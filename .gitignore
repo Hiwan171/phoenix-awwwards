@@ -1,0 +1,19 @@
+# dependências e builds (recriáveis)
+node_modules/
+dist/
+.vite/
+
+# ferramenta de terceiros que mora ao lado do projeto (tem .git próprio)
+Awwwards-mcp/
+
+# lixo de sistema / editor / logs
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.bak
+.env
+.env.*
+
+# geradores de QA (saídas)
+tools/_out/

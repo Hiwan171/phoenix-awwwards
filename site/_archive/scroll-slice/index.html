@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Phoenix — A Cycle in Five Acts</title>
+  <meta name="description" content="A scroll-driven 3D narrative about the phoenix: ash, spark, flame, ascent, return.">
+  <meta name="theme-color" content="#070504">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23070504'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23FA4C14'/%3E%3C/svg%3E">
+</head>
+<body>
+  <a class="skip" href="#act-1">Skip to content</a>
+
+  <canvas id="gl" aria-hidden="true"></canvas>
+  <div class="vignette" aria-hidden="true"></div>
+  <div class="grain" aria-hidden="true"></div>
+
+  <!-- the loader IS the opening: one ember, a counter, a line that ignites -->
+  <div id="loader" role="status" aria-live="polite">
+    <div class="loader__ember" aria-hidden="true"></div>
+    <div class="loader__row">
+      <span class="mono">Gathering ash</span>
+      <span class="mono loader__count" id="loader-count">000</span>
+    </div>
+    <div class="loader__line" aria-hidden="true"><i id="loader-bar"></i></div>
+  </div>
+
+  <header class="hud" aria-label="Status">
+    <span class="mono hud__tl">Phoenix <em>/ a cycle in five acts</em></span>
+    <span class="mono hud__tr" id="hud-act">Act I · Cinder</span>
+    <span class="mono hud__bl"><span id="hud-alt">0000</span> m</span>
+    <span class="mono hud__br" id="hud-hint">Scroll</span>
+  </header>
+
+  <nav class="acts" aria-label="Acts">
+    <ol>
+      <li><a href="#act-1" data-act="1" aria-current="true">I<span class="sr"> Cinder</span></a></li>
+      <li><a href="#act-2" data-act="2">II<span class="sr"> Spark</span></a></li>
+      <li><a href="#act-3" data-act="3" aria-disabled="true" tabindex="-1">III<span class="sr"> Flame (coming soon)</span></a></li>
+      <li><a href="#act-3" data-act="4" aria-disabled="true" tabindex="-1">IV<span class="sr"> Ascent (coming soon)</span></a></li>
+      <li><a href="#act-3" data-act="5" aria-disabled="true" tabindex="-1">V<span class="sr"> Return (coming soon)</span></a></li>
+    </ol>
+  </nav>
+
+  <div class="altimeter" aria-hidden="true">
+    <div class="altimeter__ticks" id="ticks"></div>
+    <div class="altimeter__mark" id="alt-mark"><span class="mono" id="alt-label">0</span></div>
+  </div>
+
+  <main id="scroll">
+    <section class="act act--1" id="act-1" aria-labelledby="t1">
+      <div class="act__inner">
+        <p class="kicker mono">I — Cinder</p>
+        <h1 class="display" id="t1" data-split>Everything burns.</h1>
+        <p class="lede" data-fade>Before the flame there is only what the fire leaves behind.
+          Ash keeps the shape of the thing it was.</p>
+      </div>
+    </section>
+
+    <section class="act act--2" id="act-2" aria-labelledby="t2">
+      <div class="act__inner">
+        <p class="kicker mono">II — Spark</p>
+        <h2 class="display" id="t2" data-split>One ember<br><em>remembers.</em></h2>
+        <p class="lede" data-fade>The ash gathered itself in seconds. It has done this before —
+          under other names, in other skies.</p>
+      </div>
+    </section>
+
+    <section class="act act--end" id="act-3" aria-labelledby="t3">
+      <div class="act__inner">
+        <p class="kicker mono">III — Flame</p>
+        <h2 class="display display--sm" id="t3">Fire is not<br>the end.</h2>
+        <p class="lede">The next acts are in production.</p>
+      </div>
+    </section>
+  </main>
+
+  <noscript><p style="position:fixed;inset:auto 16px 16px;color:#EEE7DB;font:14px sans-serif">
+    This experience needs JavaScript. Phoenix — a cycle in five acts: ash, spark, flame, ascent, return.</p></noscript>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

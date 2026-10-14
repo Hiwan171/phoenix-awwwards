@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phoenix rig viewer</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0b0a0c; overflow: hidden; font: 13px/1.4 system-ui, sans-serif; color: #eee; }
+  canvas { display: block; }
+  #ui { position: fixed; left: 16px; top: 16px; display: flex; flex-direction: column; gap: 8px; max-width: 240px; }
+  #ui button { padding: 8px 12px; border: 1px solid #ffffff22; border-radius: 8px; background: #17151a; color: inherit; cursor: pointer; text-align: left; }
+  #ui button.on { background: #ff5a1f; border-color: #ff5a1f; color: #fff; }
+  #ui label { display: flex; gap: 8px; align-items: center; opacity: .8; }
+  #info { opacity: .6; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div id="clips" style="display:flex;flex-direction:column;gap:8px"></div>
+  <label><input type="checkbox" id="skel"> mostrar esqueleto</label>
+  <label>velocidade <input type="range" id="speed" min="0.1" max="2" step="0.05" value="1"></label>
+  <div id="info">carregando…</div>
+</div>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+
+const FILE = new URLSearchParams(location.search).get('f') ?? './phoenix-web.glb'; // ?f=./phoenix-lite.glb | ./phoenix-rigged.glb
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0a0c);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.01, 50);
+camera.position.set(0.9, 0.25, -1.6);                   // the phoenix faces -Z
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 0); controls.enableDamping = true;
+
+let mixer, actions = {}, current, helper;
+new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(FILE, (gltf) => {
+  scene.add(gltf.scene);
+  mixer = new THREE.AnimationMixer(gltf.scene);
+  const box = document.getElementById('clips');
+  for (const clip of gltf.animations) {
+    actions[clip.name] = mixer.clipAction(clip);
+    const b = document.createElement('button'); b.textContent = `${clip.name} · ${clip.duration.toFixed(1)}s`;
+    b.onclick = () => play(clip.name); box.appendChild(b); b.dataset.name = clip.name;
+  }
+  gltf.scene.traverse((o) => { if (o.isSkinnedMesh) { o.frustumCulled = false; helper = new THREE.SkeletonHelper(o.skeleton.bones[0]); helper.visible = false; scene.add(helper); } });
+  play(gltf.animations[0]?.name);
+  document.getElementById('info').textContent = `${gltf.animations.length} clips · ${helper?.bones.length ?? 0} ossos`;
+}, undefined, (e) => { document.getElementById('info').textContent = 'erro: ' + e.message + ' (rode um servidor local, ex.: npx serve .)'; });
+
+function play(name) {
+  if (!actions[name]) return;
+  const next = actions[name].reset().fadeIn(0.35).play();
+  if (current && current !== next) current.fadeOut(0.35);
+  current = next;
+  document.querySelectorAll('#clips button').forEach((b) => b.classList.toggle('on', b.dataset.name === name));
+}
+document.getElementById('skel').onchange = (e) => { if (helper) helper.visible = e.target.checked; };
+let speed = 1; document.getElementById('speed').oninput = (e) => { speed = +e.target.value; };
+
+const clock = new THREE.Clock();
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+renderer.setAnimationLoop(() => { mixer?.update(clock.getDelta() * speed); controls.update(); renderer.render(scene, camera); });
+</script>
+</body>
+</html>

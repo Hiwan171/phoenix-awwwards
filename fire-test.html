@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phoenix · fire test (GLSL)</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #060403; overflow: hidden; font: 12px/1.4 ui-monospace, "Cascadia Mono", Menlo, monospace; color: #eee7db; }
+  canvas { display: block; }
+  #ui { position: fixed; left: 16px; top: 16px; width: 236px; display: flex; flex-direction: column; gap: 10px; }
+  #ui .row { display: flex; flex-direction: column; gap: 4px; }
+  #ui .row > span { display: flex; justify-content: space-between; opacity: .7; text-transform: uppercase; letter-spacing: .08em; font-size: 10px; }
+  #ui button { padding: 7px 10px; border: 1px solid #ffffff22; border-radius: 6px; background: #14110f; color: inherit; cursor: pointer; text-align: left; font: inherit; }
+  #ui button.on { background: #fa4c14; border-color: #fa4c14; color: #fff; }
+  #clips { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  #ui input[type=range] { width: 100%; accent-color: #fa4c14; }
+  #ui label.chk { display: flex; gap: 8px; align-items: center; opacity: .85; cursor: pointer; }
+  #hud { position: fixed; right: 16px; bottom: 14px; opacity: .55; text-align: right; }
+  #err { position: fixed; left: 16px; bottom: 14px; color: #ff6a4a; max-width: 60vw; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div id="clips"></div>
+  <button id="ignite">▶ acender (0 → 1)</button>
+  <div class="row"><span>ignição <b id="vIgnite">0.00</b></span><input type="range" id="ignite-s" min="0" max="1" step="0.005" value="0"></div>
+  <div class="row"><span>fogo <b id="vFire">1.50</b></span><input type="range" id="fire" min="0" max="2" step="0.01" value="1.5"></div>
+  <div class="row"><span>comprimento da chama <b id="vLen">0.05</b></span><input type="range" id="len" min="0" max="0.22" step="0.002" value="0.05"></div>
+  <div class="row"><span>faíscas <b id="vEmit">0.30</b></span><input type="range" id="emit" min="0" max="1" step="0.01" value="0.3"></div>
+  <div class="row"><span>bloom <b id="vBloom">0.46</b></span><input type="range" id="bloom" min="0" max="2" step="0.01" value="0.46"></div>
+  <label class="chk"><input type="checkbox" id="c-surf"> brasa na superfície</label>
+  <label class="chk"><input type="checkbox" id="c-shell" checked> línguas de chama</label>
+  <label class="chk"><input type="checkbox" id="c-spark"> faíscas</label>
+  <label class="chk"><input type="checkbox" id="c-bloom" checked> bloom</label>
+  <div class="row"><span>camadas de chama</span>
+    <select id="shells"><option selected>3</option><option>4</option><option>5</option><option>7</option></select></div>
+</div>
+<div id="hud">carregando…</div>
+<div id="err"></div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const Q = new URLSearchParams(location.search);
+const FILE = Q.get('f') ?? './phoenix-web.glb';
+const $ = (id) => document.getElementById(id);
+const errBox = $('err');
+addEventListener('error', (e) => { errBox.textContent += e.message + '\n'; });
+
+// ───────────────────────── GLSL shared chunk ─────────────────────────
+const GLSL_FIRE = /* glsl */`
+float hash13(vec3 p){ p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+float vnoise(vec3 p){
+  vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(mix(hash13(i),                 hash13(i + vec3(1,0,0)), f.x),
+        mix(hash13(i + vec3(0,1,0)),   hash13(i + vec3(1,1,0)), f.x), f.y),
+    mix(mix(hash13(i + vec3(0,0,1)),   hash13(i + vec3(1,0,1)), f.x),
+        mix(hash13(i + vec3(0,1,1)),   hash13(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+float fbm3(vec3 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 3; i++){ s += a * vnoise(p); p = p * 2.03 + vec3(7.1, 3.7, 5.3); a *= 0.5; } return s; }
+float fbm4(vec3 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 4; i++){ s += a * vnoise(p); p = p * 2.03 + vec3(7.1, 3.7, 5.3); a *= 0.5; } return s; }
+// blackbody-ish ramp: 0 = cold ash ... 1 = white-hot (HDR, feeds bloom)
+vec3 fireRamp(float t){
+  t = clamp(t, 0.0, 1.0);
+  vec3 c = mix(vec3(0.0), vec3(0.55, 0.03, 0.0), smoothstep(0.00, 0.30, t));
+  c = mix(c, vec3(1.00, 0.28, 0.02), smoothstep(0.25, 0.55, t));
+  c = mix(c, vec3(1.00, 0.68, 0.16), smoothstep(0.50, 0.80, t));
+  c = mix(c, vec3(1.00, 0.95, 0.75), smoothstep(0.78, 1.00, t));
+  return c;
+}
+`;
+
+// uniforms shared by every layer (single source of truth for the sliders)
+const U = {
+  uTime:   { value: 0 },
+  uIgnite: { value: 0 },
+  uFire:   { value: 1.5 },
+  uLen:    { value: 0.05 },
+  uEmit:   { value: 0.3 },
+  uYMin:   { value: -0.5 },
+  uYMax:   { value: 0.5 },
+};
+
+// ───────────────────────── renderer / scene ─────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x060403);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.9;                        // the model keeps its own lighting; fire is an extension
+const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.01, 50);
+camera.position.set(0.9, 0.25, -1.6);                    // the phoenix faces -Z
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+// fire lights: warm point lights that pulse (cheap, makes the room react)
+const fireLightA = new THREE.PointLight(0xff5a1a, 0.5, 3, 2);
+const fireLightB = new THREE.PointLight(0xffa030, 1, 3, 2);
+scene.add(fireLightA, fireLightB);
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.46, 0.4, 0.9);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
+
+// ───────────────────────── fire layers ─────────────────────────
+let mixer, actions = {}, current, skinned, skeleton;
+let shells = [], sparks = null;
+const layers = { surf: false, shell: true, spark: false, bloom: true };   // approved preset
+
+// 1) surface: the phoenix's own PBR material gets an emissive "burning" term
+function patchSurface(mat) {
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, U);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vFWPos;`)
+      .replace('#include <project_vertex>', `#include <project_vertex>
+        vFWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vFWPos;
+        uniform float uTime, uIgnite, uFire, uYMin, uYMax, uSurf;
+        ${GLSL_FIRE}`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        {
+          float h = clamp((vFWPos.y - uYMin) / (uYMax - uYMin), 0.0, 1.0);
+          float reach = uIgnite * 1.35 - 0.2;
+          float burn = smoothstep(h, h + 0.15, reach);
+          float front = exp(-pow((h - reach + 0.04) / 0.035, 2.0));
+          vec3 q = vFWPos * vec3(6.0, 3.5, 6.0) - vec3(0.0, uTime * 0.6, 0.0);
+          float n = fbm3(q);
+          float fres = pow(1.0 - saturate(dot(normalize(vNormal), normalize(vViewPosition))), 2.0);
+          // The model's own colours are the fuel: emission = albedo * k. The texture is never
+          // darkened or repainted, so every feather detail survives; it only "heats up".
+          float pulse = smoothstep(0.45, 0.85, n);
+          float k = (0.08 + 0.50 * pulse + 0.30 * fres) * burn;
+          vec3 warm = mix(vec3(1.0), vec3(1.0, 0.74, 0.45), pulse);
+          totalEmissiveRadiance += diffuseColor.rgb * (warm * k + front * 1.2) * uFire * uSurf;
+        }`);
+  };
+  mat.customProgramCacheKey = () => 'phoenix-fire-surface';
+}
+U.uSurf = { value: layers.surf ? 1 : 0 };
+
+// 2) flame tongues: N extruded shells of the *skinned* mesh, noise-carved, additive
+const SHELL_VERT = /* glsl */`
+uniform float uTime, uShell, uLen, uYMin, uYMax;
+varying vec3 vWPos; varying vec3 vN; varying vec2 vUv; varying float vH;
+#include <common>
+#include <skinning_pars_vertex>
+void main() {
+  vUv = uv;
+  #include <beginnormal_vertex>
+  #include <skinbase_vertex>
+  #include <skinnormal_vertex>
+  #include <begin_vertex>
+  #include <skinning_vertex>
+  vec3 n = normalize(objectNormal);
+  vec4 base = modelMatrix * vec4(transformed, 1.0);
+  vH = clamp((base.y - uYMin) / (uYMax - uYMin), 0.0, 1.0);
+  // per-vertex length jitter breaks the "stacked slabs" look
+  float jit = 0.55 + 0.9 * fract(sin(dot(base.xyz * 37.0, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
+  float L = uLen * uShell * jit;
+  vec4 wp = modelMatrix * vec4(transformed + n * L * 0.2, 1.0);
+  wp.y += L * 1.5;                                                 // flames lick upward in world space
+  wp.x += sin(wp.y * 18.0 + uTime * 3.2 + uShell * 4.0) * 0.006 * uShell;
+  wp.z += cos(wp.y * 15.0 - uTime * 2.7 + uShell * 3.0) * 0.006 * uShell;
+  vWPos = wp.xyz;
+  vN = normalize(mat3(modelMatrix) * n);
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}`;
+const SHELL_FRAG = /* glsl */`
+uniform float uTime, uShell, uFire, uIgnite;
+uniform sampler2D uMap;
+varying vec3 vWPos; varying vec3 vN; varying vec2 vUv; varying float vH;
+${GLSL_FIRE}
+void main() {
+  // Flames may only LEAVE the model: they exist on upward-facing skin and on the silhouette.
+  // Everything facing the camera head-on gets no flame, so the texture is never covered.
+  vec3 N = normalize(vN);
+  vec3 V = normalize(cameraPosition - vWPos);
+  float rim = pow(1.0 - abs(dot(N, V)), 1.6);
+  float up = clamp(N.y, 0.0, 1.0);
+  float emitter = smoothstep(0.12, 0.75, up * 0.85 + rim * 0.75);
+  float burn = smoothstep(vH, vH + 0.15, uIgnite * 1.35 - 0.2);
+  if (emitter * burn < 0.02) discard;                        // also skips the noise: big fps win
+
+  // tall, thin tongues: noise stretched along Y and scrolling upward faster with height
+  vec3 q = vWPos * vec3(16.0, 5.0, 16.0) - vec3(0.0, uTime * (1.3 + uShell * 1.8), 0.0);
+  float n = fbm4(q);
+  n += 0.45 * (fbm3(q * 1.7 + vec3(uTime * 0.35, uTime * 0.5, 3.0)) - 0.5);
+  vec3 albedo = texture2D(uMap, vUv).rgb;
+  float luma = dot(albedo, vec3(0.30, 0.59, 0.11));
+  float cover = n * 0.95 + luma * 0.35 - 0.12;
+  float edge = 0.30 + uShell * 0.62;                         // higher shells survive only the noise peaks
+  float a = smoothstep(edge, edge + 0.12, cover);
+  float fade = pow(1.0 - uShell, 1.2);
+  float flick = 0.88 + 0.12 * sin(uTime * 17.0 + vWPos.y * 40.0);
+  float core = clamp(cover - edge, 0.0, 1.0);
+
+  // the flame inherits the feather's own colour at its root, then settles to ember orange / gold
+  vec3 root = albedo * 1.7 + 0.04;
+  vec3 tip  = mix(vec3(1.0, 0.36, 0.05), vec3(1.0, 0.70, 0.24), core);
+  vec3 col  = mix(root, tip, smoothstep(0.0, 0.55, uShell));
+  gl_FragColor = vec4(col * uFire * flick, a * fade * burn * emitter * 0.5);
+}`;
+
+function buildShells(count) {
+  shells.forEach((s) => { s.parent?.remove(s); s.material.dispose(); });
+  shells = [];
+  const map = skinned.material.map;
+  for (let i = 0; i < count; i++) {
+    const lvl = (i + 1) / (count + 1);
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { ...U, uShell: { value: lvl }, uMap: { value: map } },
+      vertexShader: SHELL_VERT, fragmentShader: SHELL_FRAG,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.FrontSide,
+    });
+    const m = new THREE.SkinnedMesh(skinned.geometry, mat);
+    m.bind(skeleton, skinned.bindMatrix);
+    m.frustumCulled = false;
+    m.renderOrder = 10 + i;
+    m.visible = layers.shell;
+    skinned.parent.add(m);
+    shells.push(m);
+  }
+}
+
+// 3) sparks: GPU particles born on the skin. A ring-buffer texture keeps the last
+//    ~2 s of skinning matrices so each ember knows where the bone WAS when it was born.
+const HIST = 128;
+let hist = null, histData = null, histLast = -1;
+const SPARK_VERT = /* glsl */`
+attribute vec3 aSurf; attribute float aBone; attribute vec4 aRand;
+uniform sampler2D uHist;
+uniform float uTime, uSize, uScale, uEmit, uIgnite, uYMin, uYMax;
+varying float vU; varying float vOn;
+const float HIST = ${HIST}.0;
+mat4 histMat(float bone, float row) {
+  ivec2 c = ivec2(int(bone) * 4, int(row));
+  return mat4(texelFetch(uHist, c, 0), texelFetch(uHist, c + ivec2(1, 0), 0),
+              texelFetch(uHist, c + ivec2(2, 0), 0), texelFetch(uHist, c + ivec2(3, 0), 0));
+}
+float h11(float n) { return fract(sin(n * 127.1) * 43758.5453); }
+void main() {
+  float life = mix(0.8, 1.7, aRand.x);
+  float tau = uTime + aRand.y * life;
+  float cyc = floor(tau / life);
+  float age = tau - cyc * life;
+  float u = age / life;
+  float birth = uTime - age;
+  float row = mod(floor(birth * 60.0), HIST);
+  mat4 M = histMat(aBone, row);
+  vec3 off = vec3(h11(cyc * 1.3 + aRand.z * 91.0), h11(cyc * 2.1 + aRand.w * 57.0), h11(cyc * 3.7 + aRand.x * 33.0)) - 0.5;
+  vec4 p0 = modelMatrix * M * vec4(aSurf + off * 0.04, 1.0);
+  vec3 P = p0.xyz;
+  float s = aRand.w * 6.2831;
+  P.y += age * 0.10 + age * age * 0.07;
+  P.x += sin(age * 5.0 + s) * 0.018 * u + (aRand.x - 0.5) * 0.035 * u;
+  P.z += cos(age * 4.3 + s * 1.7) * 0.018 * u + (aRand.z - 0.5) * 0.035 * u;
+  float h = clamp((p0.y - uYMin) / (uYMax - uYMin), 0.0, 1.0);
+  float burn = smoothstep(h, h + 0.1, uIgnite * 1.35 - 0.2);
+  float on = step(h11(aRand.x * 77.7 + aRand.y * 13.1), uEmit) * burn;
+  vU = u; vOn = on;
+  vec4 mv = viewMatrix * vec4(P, 1.0);
+  gl_Position = projectionMatrix * mv;
+  gl_PointSize = on > 0.0 ? uSize * uScale * (1.0 - u * 0.85) * (0.5 + aRand.x) / -mv.z : 0.0;
+}`;
+const SPARK_FRAG = /* glsl */`
+uniform float uFire;
+varying float vU; varying float vOn;
+${GLSL_FIRE}
+void main() {
+  vec2 c = gl_PointCoord - 0.5;
+  float d = dot(c, c) * 4.0;
+  float a = exp(-d * 3.5) * (1.0 - vU) * vOn;
+  if (a < 0.01) discard;
+  gl_FragColor = vec4(fireRamp(0.62 - vU * 0.45) * 1.25 * uFire, a);
+}`;
+
+function buildSparks(count = 7000) {
+  const g = skinned.geometry;
+  const pos = g.attributes.position, si = g.attributes.skinIndex;
+  const nV = pos.count;
+  const aSurf = new Float32Array(count * 3), aBone = new Float32Array(count), aRand = new Float32Array(count * 4);
+  const nrm = g.attributes.normal;
+  for (let i = 0; i < count; i++) {
+    // embers are born on upward-facing skin only (tops of wings, crest, back) and rise from there
+    let v = 0;
+    for (let tries = 0; tries < 12; tries++) { v = (Math.random() * nV) | 0; if (nrm.getY(v) > 0.25) break; }
+    aSurf.set([pos.getX(v), pos.getY(v), pos.getZ(v)], i * 3);
+    aBone[i] = si.getX(v);                                   // dominant bone (weights are sorted)
+    aRand.set([Math.random(), Math.random(), Math.random(), Math.random()], i * 4);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(aSurf.slice(), 3));
+  geo.setAttribute('aSurf', new THREE.BufferAttribute(aSurf, 3));
+  geo.setAttribute('aBone', new THREE.BufferAttribute(aBone, 1));
+  geo.setAttribute('aRand', new THREE.BufferAttribute(aRand, 4));
+  const nB = skeleton.bones.length;
+  histData = new Float32Array(nB * 4 * HIST * 4);
+  hist = new THREE.DataTexture(histData, nB * 4, HIST, THREE.RGBAFormat, THREE.FloatType);
+  hist.minFilter = hist.magFilter = THREE.NearestFilter;
+  hist.needsUpdate = true;
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { ...U, uHist: { value: hist }, uSize: { value: 0.006 }, uScale: { value: 1 } },
+    vertexShader: SPARK_VERT, fragmentShader: SPARK_FRAG,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  sparks = new THREE.Points(geo, mat);
+  sparks.frustumCulled = false;
+  sparks.renderOrder = 30;
+  sparks.visible = layers.spark;
+  scene.add(sparks);
+}
+
+function writeHistoryRow(s) {
+  // NB: three re-allocates skeleton.boneMatrices (padded to the bone texture size) after the first
+  // render, so the row stride must come from the bone count, never from boneMatrices.length.
+  const n = skeleton.bones.length * 16;
+  const row = ((s % HIST) + HIST) % HIST;
+  histData.set(skeleton.boneMatrices.subarray(0, n), row * n);
+}
+
+// ───────────────────────── load ─────────────────────────
+new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(FILE, (gltf) => {
+  scene.add(gltf.scene);
+  gltf.scene.traverse((o) => { if (o.isSkinnedMesh && !skinned) skinned = o; });
+  skeleton = skinned.skeleton;
+  skinned.frustumCulled = false;
+  skinned.material.envMapIntensity = 1.0;
+  patchSurface(skinned.material);
+
+  // NB: geometry is meshopt-quantised (bounds are normalised), so the ignition range uses the
+  // model's real world-space height instead: y ∈ [-0.5, 0.5] (see U.uYMin / U.uYMax).
+
+  mixer = new THREE.AnimationMixer(gltf.scene);
+  const box = $('clips');
+  for (const clip of gltf.animations) {
+    actions[clip.name] = mixer.clipAction(clip);
+    const b = document.createElement('button'); b.textContent = clip.name; b.dataset.name = clip.name;
+    b.onclick = () => play(clip.name); box.appendChild(b);
+  }
+  play(Q.get('clip') ?? 'Hover');
+
+  buildShells(+$('shells').value);
+  buildSparks();
+  scene.updateMatrixWorld(true); skeleton.update();
+  for (let r = 0; r < HIST; r++) writeHistoryRow(r);
+  hist.needsUpdate = true;
+  window.__ready = true;
+  $('hud').textContent = '';
+  // auto-ignite unless a fixed value is requested (used for screenshots)
+  if (Q.has('ignite')) setIgnite(+Q.get('ignite'));
+  else igniteFrom = performance.now() + 700;
+}, undefined, (e) => { errBox.textContent = 'erro ao carregar: ' + e.message; });
+
+function play(name) {
+  if (!actions[name]) return;
+  const next = actions[name].reset().fadeIn(0.35).play();
+  if (current && current !== next) current.fadeOut(0.35);
+  current = next;
+  document.querySelectorAll('#clips button').forEach((b) => b.classList.toggle('on', b.dataset.name === name));
+}
+
+// ───────────────────────── UI ─────────────────────────
+let igniteFrom = 0;
+function setIgnite(v) { U.uIgnite.value = v; $('ignite-s').value = v; $('vIgnite').textContent = v.toFixed(2); }
+$('ignite').onclick = () => { setIgnite(0); igniteFrom = performance.now(); };
+$('ignite-s').oninput = (e) => { igniteFrom = 0; setIgnite(+e.target.value); };
+const bind = (id, vid, uni, fmt = 2) => $(id).oninput = (e) => { U[uni].value = +e.target.value; $(vid).textContent = (+e.target.value).toFixed(fmt); };
+bind('fire', 'vFire', 'uFire'); bind('len', 'vLen', 'uLen'); bind('emit', 'vEmit', 'uEmit');
+$('bloom').oninput = (e) => { bloomPass.strength = +e.target.value; $('vBloom').textContent = (+e.target.value).toFixed(2); };
+$('c-surf').onchange = (e) => { layers.surf = e.target.checked; U.uSurf.value = layers.surf ? 1 : 0; };
+$('c-shell').onchange = (e) => { layers.shell = e.target.checked; shells.forEach((s) => s.visible = layers.shell); };
+$('c-spark').onchange = (e) => { layers.spark = e.target.checked; if (sparks) sparks.visible = layers.spark; };
+$('c-bloom').onchange = (e) => { layers.bloom = e.target.checked; bloomPass.enabled = layers.bloom; };
+$('shells').onchange = (e) => { if (skinned) buildShells(+e.target.value); };
+if (Q.has('fire')) { U.uFire.value = +Q.get('fire'); $('fire').value = Q.get('fire'); }
+if (Q.has('len')) { U.uLen.value = +Q.get('len'); $('len').value = Q.get('len'); }
+for (const k of (Q.get('off') ?? '').split(',').filter(Boolean)) { const el = document.getElementById('c-' + k); if (el) { el.checked = false; el.onchange({ target: el }); } }
+if (Q.has('bloomv')) { bloomPass.strength = +Q.get('bloomv'); }
+if (Q.get('cam') === 'front') camera.position.set(-0.05, 0.1, -1.7);
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
+});
+
+// ───────────────────────── loop ─────────────────────────
+const clock = new THREE.Clock();
+let elapsed = 0, fpsAcc = 0, fpsN = 0;
+const fixedT = Q.has('t') ? +Q.get('t') : null;      // freeze time for screenshots
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.1);
+  elapsed += dt;
+  const t = fixedT ?? elapsed;
+  U.uTime.value = t;
+
+  if (igniteFrom && performance.now() > igniteFrom) {
+    const k = Math.min(1, (performance.now() - igniteFrom) / 5200);
+    setIgnite(1 - Math.pow(1 - k, 2.2));
+    if (k >= 1) igniteFrom = 0;
+  }
+  if (mixer) {
+    mixer.update(fixedT !== null ? 0 : dt);
+    if (fixedT !== null && !renderer.__seeked) { mixer.setTime(fixedT); renderer.__seeked = true; }
+    scene.updateMatrixWorld(true);
+    skeleton.update();
+    if (sparks) {
+      const s = Math.floor(t * 60);
+      for (let k = Math.max(histLast + 1, s - 8); k <= s; k++) writeHistoryRow(k);
+      if (s > histLast) { histLast = s; hist.needsUpdate = true; }
+      sparks.material.uniforms.uScale.value = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+    }
+  }
+  // fire lights breathe with the ignition
+  const ig = U.uIgnite.value * U.uFire.value;
+  fireLightA.position.set(0.25, -0.35 + Math.sin(t * 3.1) * 0.03, -0.65);
+  fireLightA.intensity = (0.6 + Math.sin(t * 11) * 0.12 + Math.sin(t * 23) * 0.06) * ig;
+  fireLightB.position.set(-0.35, 0.35, 0.7);
+  fireLightB.intensity = (0.35 + Math.sin(t * 9 + 2) * 0.1) * ig;
+
+  controls.update();
+  composer.render();
+
+  fpsAcc += dt; fpsN++;
+  if (fpsAcc > 0.5 && window.__ready) { $('hud').textContent = Math.round(fpsN / fpsAcc) + ' fps'; fpsAcc = 0; fpsN = 0; }
+});
+</script>
+</body>
+</html>
