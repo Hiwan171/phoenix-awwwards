@@ -7,6 +7,6 @@ export default defineConfig({
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 900,
-    rollupOptions: { input: { main: resolve(__dirname, 'index.html'), sky: resolve(__dirname, 'sky.html') } },
+    rollupOptions: { input: { main: resolve(__dirname, 'index.html'), sky: resolve(__dirname, 'sky.html'), fly: resolve(__dirname, 'fly.html') } },
   },
 });

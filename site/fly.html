@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en" translate="no">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Phoenix — Flight test</title>
+  <meta name="theme-color" content="#070504">
+  <style>
+    /* scroll space: the canvas is fixed, the page only exists to give the scroll bar a length */
+    #track { height: 800vh; }
+    .fly-hud { position: fixed; z-index: 20; left: var(--pad); bottom: var(--pad); display: grid; gap: 4px; opacity: 0.8; pointer-events: none; }
+    .fly-hint { position: fixed; z-index: 20; right: var(--pad); bottom: var(--pad); text-align: right; opacity: 0.7; }
+    .fly-bar { position: fixed; z-index: 20; left: 0; top: 0; height: 2px; width: 0; background: var(--ember); }
+  </style>
+</head>
+<body>
+  <canvas id="gl" aria-hidden="true"></canvas>
+  <div class="vignette" aria-hidden="true"></div>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="fly-bar" id="bar"></div>
+  <div class="fly-hud mono" id="hud" aria-hidden="true">
+    <span id="h-u">path 0.000</span><span id="h-v">speed 0.0</span><span id="h-b">bank 0°</span><span id="h-m">mode hover</span>
+  </div>
+  <div class="fly-hint mono" aria-hidden="true">scroll = fly · <span id="h-auto">SPACE: auto-flight</span></div>
+  <div id="track"></div>
+  <script type="module" src="/src/fly.js"></script>
+</body>
+</html>
