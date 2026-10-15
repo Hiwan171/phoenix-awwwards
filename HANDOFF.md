@@ -5,7 +5,8 @@ Quem retoma (Claude ou humano): leia este arquivo, depois `DESIGN-BRIEF.md`.
 
 ## Como rodar em outra máquina
 ```bash
-git clone <url do repositório> && cd <pasta>
+git clone -b v2 https://github.com/Hiwan171/phoenix-awwwards && cd phoenix-awwwards
+# (a branch v2 tem tudo de 14-15/10/2026; a main ainda é a 1ª fênix, de antes do v2)
 cd site && npm install
 npm run dev            # http://localhost:5173
 
