@@ -17,3 +17,9 @@ Thumbs.db
 
 # geradores de QA (saídas)
 tools/_out/
+
+# intermediates of tools/make-phoenix.sh (regenerable)
+model/phoenix-prep*.glb
+model/phoenix-rigged*.glb
+model/_*.json
+model/_*.glb
