@@ -31,6 +31,8 @@ const WING = {
 };
 const TWIST = { Shoulder: 0, Arm: 3, Forearm: 5, Hand: 8, Tip1: 11, Tip2: 13 };   // pronation along the span
 const WING_DIR = { L: [-0.2, 0.3, -0.13], R: [0.2, 0.3, 0.12] };                   // rough span axis for twist
+// per-model overrides (set by the rig builder): span axes of the wings and the scale of the body bob
+export const MODEL = { wingDir: null, bob: 0.010 };
 
 // P: {wing, hold, fold, body, tail, rib}
 export function pose(P, phi, jointNames) {
@@ -49,7 +51,7 @@ export function pose(P, phi, jointNames) {
       const rz = sgn * (flap + fold) * D;
       const twist = TWIST[part] * D * P.wing * (0.6 * Math.sin(TAU * (phi - lag - 0.1)) + 0.4);
       const qf = qAxisAngle([0, 0, 1], rz);
-      const qt = qAxisAngle(WING_DIR[side], sgn * twist);
+      const qt = qAxisAngle((MODEL.wingDir ?? WING_DIR)[side], sgn * twist);
       set(`Wing_${side}_${part}`, qMul(qf, qt));
     }
   }
@@ -67,14 +69,22 @@ export function pose(P, phi, jointNames) {
   set('Crest2', qEuler(8 * D * b * wave(phi, 0.38), 0, 5 * D * b * wave(phi, 0.38, 1, 1)));
   set('Beak',   qEuler(2 * D * b * Math.max(0, wave(phi, 0.1))));
 
-  // tails: travelling wave, lag grows down the plume, amplitude grows toward the tip
-  const tailCfg = { A: { off: 0.00, ph: 0.0 }, B: { off: 0.07, ph: 1.0 }, C: { off: 0.14, ph: 2.1 } };
-  for (const [id, c] of Object.entries(tailCfg)) {
+  // tails: travelling wave, lag grows down the plume, amplitude grows toward the tip. Works for any number of chains
+  // (Tail_<ID>_<k>): every chain gets its own phase so the fan ripples instead of moving as one block.
+  const tailIds = [...new Set([...jointNames].map((n) => /^Tail_([A-Z])_\d+$/.exec(n)?.[1]).filter(Boolean))].sort();
+  tailIds.forEach((id, ci) => {
+    const off = 0.045 * ci, ph = 1.05 * ci;
     for (let k = 1; k <= 5; k++) {
-      const lag = 0.22 + c.off + 0.045 * k, amp = (2.0 + 1.8 * k) * D * P.tail;
-      set(`Tail_${id}_${k}`, qEuler(amp * wave(phi, lag, 1, c.ph), 0.4 * amp * wave(phi, lag + 0.1, 1, c.ph), 0.9 * amp * wave(phi, lag + 0.25, 1, c.ph + 1.3)));
+      const lag = 0.22 + off + 0.045 * k, amp = (2.0 + 1.8 * k) * D * P.tail;
+      set(`Tail_${id}_${k}`, qEuler(amp * wave(phi, lag, 1, ph), 0.4 * amp * wave(phi, lag + 0.1, 1, ph), 0.9 * amp * wave(phi, lag + 0.25, 1, ph + 1.3)));
     }
+  });
+  // legs: a slow sway, tucked
+  for (const [side, ph] of [['L', 0.0], ['R', 0.9]]) for (let k = 1; k <= 3; k++) {
+    const amp = (1.5 + 1.2 * k) * D * (P.rib ?? 1), lag = 0.2 + 0.05 * k;
+    set(`Leg_${side}_${k}`, qEuler(amp * wave(phi, lag, 1, ph), 0, 0.6 * amp * wave(phi, lag + 0.15, 1, ph + 1)));
   }
+
   // ribbons: lighter, with a faster flutter on top
   ['L1', 'L2', 'R1', 'R2'].forEach((id, ri) => {
     for (let k = 1; k <= 4; k++) {
@@ -85,7 +95,7 @@ export function pose(P, phi, jointNames) {
   });
 
   // body bob (Root translation, model-space units)
-  if (jointNames.has('Root')) out.Root.t = [0, 0.010 * P.body * Math.sin(TAU * phi), 0];
+  if (jointNames.has('Root')) out.Root.t = [0, MODEL.bob * P.body * Math.sin(TAU * phi), 0];
   return out;
 }
 
