@@ -1,0 +1,11 @@
+# Intro "a brasa é a semente" (arquivada em 14/10/2026)
+
+Hero com fundo preto e a transição inicial: brasa no mundo → cinza nasce com o carregamento (`uBirth`) → vórtice →
+silhueta → dissolução em baixo-para-cima → ignição. Tudo funcionando e testado (144 fps, pular com Esc/Espaço/Enter).
+
+Arquivada porque o usuário pediu para eliminar a transição de início e reformulá-la com o céu como cenário do hero.
+Para reaproveitar: os shaders `ASH_*` / `EMBER_*` continuam em `src/shaders.js`, e o patch de revelação é
+`patchPhoenixMaterial(mat, U, { reveal: true })` em `src/phoenix-material.js`.
+
+Arquivos: `main.js` (boot + timeline GSAP), `stage.js` (cinza, brasa, revelação, aura), `index.html`, `style.css`
+(estado em que estavam, com a fênix v2 e a aura). Não são importados por nada em `src/`.
