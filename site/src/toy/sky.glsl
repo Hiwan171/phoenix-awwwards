@@ -10,14 +10,42 @@
 precision highp float;
 
 // [PHX] ---- controles do cenário parado -------------------------------------
+#ifndef SUN_T
 #define SUN_T        14.6           // altura do sol: 12.66 = baixo/laranja forte | 14.6 = entardecer laranja (padrão) | 15.7 = dourado claro | 20.9 = ciano (Shadertoy)
+#endif
+#ifndef CAM_PITCH
+#define CAM_PITCH    0.0            // inclinação da câmera (rad, + = olha para cima): move o horizonte; usado pelo voo
+#endif
+#ifndef CAM_YAW
 #define CAM_YAW      -0.54           // giro horizontal da câmera (rad); mexa para deslocar o sol na tela
+#endif
 #define CAM_ROLL     0.0
 #define WATER_RIPPLE 1.0           // 0.0 = espelho liso (pula o cálculo da normal: ~metade do custo); 1.0 = original
+#ifndef SKY_EXPOSURE
 #define SKY_EXPOSURE 0.92           // brilho geral do céu (menor = mais escuro, mais contraste para a fênix)
+#endif
+#ifndef SEA_DARK
 #define SEA_DARK     0.42           // mar mais escuro com a profundidade (1.0 = original); dá chão para a fênix e o fogo aparecerem
+#endif
 #define CLOUD_SPEED  0.30           // 1.0 = velocidade original do shader (rápida demais); 0.30 = brisa natural
 #define SUN_REFLECTION 0.0          // 1.0 = mostra o 2º sol refletido na "água" (original); 0.0 = só o brilho
+// [PHX] cor do céu. ATENÇÃO: o resultado passa por pow(.,2.6) e tonemap, então o tint é MUITO amplificado:
+// (1.0,0.74,0.42) sai ≈ (1.0,0.46,0.11). Para um céu menos saturado, aproxime o tint do branco.
+#ifndef SKY_HORIZON_TINT
+#define SKY_HORIZON_TINT vec3(1.0, 0.74, 0.42)   // perto do horizonte / do sol
+#endif
+#ifndef SKY_TOP_TINT
+#define SKY_TOP_TINT     vec3(0.95, 0.76, 0.62)  // alto do céu
+#endif
+#ifndef SKY_TOP_RANGE
+#define SKY_TOP_RANGE    0.95                     // skyPow em que o tint do alto vale 100 % (menor = o alto começa mais cedo)
+#endif
+#ifndef SEA_TINT
+#define SEA_TINT         vec3(0.92, 0.66, 0.46)  // cor da superfície refletora
+#endif
+#ifndef SEA_GAIN
+#define SEA_GAIN         0.62
+#endif
 // ------------------------------------------------------------------------------
 
 float gRefl = 0.0;   // [PHX] 1.0 quando o raio veio do plano refletor
@@ -81,7 +109,7 @@ vec3 shadeBg(vec3 nml, vec2 fragCoord)
 	bgCol += sun*(sunD+pow( sp, max(128.0, abs(bgLight.y)*512.0) ));
 	bgCol += vec3(0.4,0.2,0.15)*(pow( sp, 8.0) + pow( sp, max(8.0, abs(bgLight.y)*128.0) ));
     // [PHX] entardecer: laranja-âmbar no horizonte -> pêssego quente no alto (sem roxo/vermelho)
-    bgCol *= mix(vec3(1.0, 0.74, 0.42), vec3(0.95, 0.76, 0.62), smoothstep(0.0, 0.95, skyPow));
+    bgCol *= mix(SKY_HORIZON_TINT, SKY_TOP_TINT, smoothstep(0.0, SKY_TOP_RANGE, skyPow));
     bgCol *= SKY_EXPOSURE;
     bgCol *= 1.0 - clamp(bgLight.y*3.0, 0.0, 0.6);
     float cloudFac = pow(abs(skyPow), 0.8)*1.0;
@@ -131,7 +159,10 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
 	vec2 aspect = vec2(iResolution.x/iResolution.y, 1.0);
 	vec2 uv = (2.0 * (fragCoord.xy / iResolution.xy) - 1.0) * aspect;
     mat3 rot = rotationXY( vec2( CAM_YAW, CAM_ROLL ) );     // [PHX] câmera parada
-	vec3 d = rot * normalize(vec3(uv, 1.0));
+	vec3 v0 = normalize(vec3(uv, 1.0));
+	float cpt = cos(CAM_PITCH), spt = sin(CAM_PITCH);
+	v0 = vec3(v0.x, v0.y * cpt + v0.z * spt, -v0.y * spt + v0.z * cpt);   // [PHX] pitch
+	vec3 d = rot * v0;
 	vec3 p = vec3(uv*-2.0, -9.5);
     vec3 tr = vec3(1.0);
     float d0y = d.y;                                   // [PHX] altura do raio antes do reflexo
@@ -143,7 +174,7 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
         nml = mix(nml, vec3(0.0, 1.0, 0.0), f);
         d = reflect(d, nml);
         gRefl = 1.0;
-        tr *= mix(0.62*vec3(0.92, 0.66, 0.46), vec3(1.0), f);                      // [PHX] mar vinho/avermelhado
+        tr *= mix(SEA_GAIN*SEA_TINT, vec3(1.0), f);                      // [PHX] mar vinho/avermelhado
     }
 
     vec3 col = tr * shadeBg(-d, fragCoord);
