@@ -1,7 +1,132 @@
 # HANDOFF — Phoenix (projeto Awwwards, meta: Honorable Mention)
 
-Contexto completo para retomar em outra máquina / sessão. Atualizado em 14/10/2026 (transição A + **fênix v2 esculpida, colorida e com aura, integrada ao hero**).
+Contexto completo para retomar em outra máquina / sessão. **Atualizado em 15/10/2026: a fênix v2 foi REMOVIDA** (leia a
+primeira seção; o resto do arquivo é histórico da fênix antiga, útil como referência técnica).
 Quem retoma (Claude ou humano): leia este arquivo, depois `DESIGN-BRIEF.md`.
+
+## 15/10/2026 — virada: as feras seguem o estilo do dragão
+
+**Decisão do usuário.** O dragão (`model/dragon/dragon.glb`: malha única de ~595k tris, BaseColor 4096² real, normal 4096²,
+metal/rugosidade 2048², sem rig nem animação) ficou totalmente fora do estilo da fênix v2 (argila neutra pintada por código,
+cascas de fogo, aura). Para o conjunto ler como UMA peça (e não pesar contra no júri do Awwwards), **todas as feras terão a
+mesma textura/estilo do dragão**. A **cena inicial segue sendo uma fênix, mas uma NOVA** nesse estilo (já está em `model/Fenix/fenix.glb`: 594.901 tris,
+BaseColor 4096², sem rig; bruta, ainda não otimizada); **o dragão entra em outra cena** (`model/dragon/dragon.glb`) e virão
+outras feras. Ambas as pastas (~130 MB cada, com PNGs soltos duplicados) ainda NÃO estão commitadas: o GLB web de cada uma sai
+em ~3 MB pela receita abaixo (testado no dragão: 595k → 119k tris, 2,9 MB); versionar só ele, não os brutos.
+Por isso a fênix v2 e tudo que era específico dela saiu do repositório; ficou só o céu de fundo e o palco.
+
+**O que saiu** (tudo recuperável: o último commit com a fênix é `0a0f28f` = `origin/v2`):
+GLBs (`site/public/models/*`, `model/model.glb` + texturas, `assets/source/tripo*.glb`), plumagem procedural
+(`plumage.js`, `phoenix-material.js`, `shaders.js`: cascas de fogo, cinza, brasa), `noise-tex.js`, o voo (`fly.html`,
+`fly.js`, `wingflight.js`), o laboratório (`sky.html`, `sky-test.js`, `sky.js`), `fire-test.html`, `viewer.html` e as
+ferramentas de rig (`build-rig*.mjs`, `skeleton*.mjs`, `anim.mjs`, `landmarks/centroids/tails/silhouette/kmeans/texprobe`,
+`dump-skeleton`, `debug-skel`, `inspect-viewer/`, `make-phoenix.sh`) e, a pedido, toda a camada de UI do hero (loader "Gathering
+ash", copy, HUD, nav, altímetro, vinheta, grão). Para trazer algo de volta:
+`git show 0a0f28f:site/src/plumage.js > site/src/plumage.js` (ou `git checkout 0a0f28f -- <caminho>`).
+
+**O que ficou** (genérico, serve às novas feras):
+- `site/src/stage.js` — palco: renderer, céu (Shadertoy `XsBXDc`), rig de luz aprovado (`looks.js`), compositor, **governador de
+  qualidade**, ganchos de QA (`S.t` congela o relógio; `?q=N` fixa um tier; `?gov=0|1`). `load()` não baixa nada hoje.
+- `site/src/hero-post.js` — pós-processamento fundido (ver abaixo). `flame-aura.js` fornece o campo de chama da aura.
+- `tools/`: `prep-model.mjs` (solda + decima um GLB bruto do gerador) e `optimize.mjs` (WebP + Meshopt) servem direto às
+  novas feras; `inspect.mjs`, `verify.mjs`, `qa.mjs`, `live.mjs`, `render.mjs`/`project.mjs` também.
+- Backup do trabalho de performance NÃO commitado (plumagem assada por vértice, cascas com LOD, pré-passe...):
+  pasta `phoenix-awwwards.backup-20261015-103322` ao lado do projeto (pode apagar quando quiser).
+
+**Estado do hero agora (15/10/2026, a pedido do usuário: "vamos criar esse mundo hero todo do zero"):** SÓ o shader do céu,
+em tela cheia, rodando sozinho. **Sem transição de abertura, sem loader, sem texto, HUD, nav, altímetro, vinheta nem grão.**
+O DOM é `<canvas id="gl">` + o script; `style.css` tem ~10 linhas; `main.js` só liga o palco e o ticker do GSAP; as fontes
+(`@fontsource/*`) continuam no `package.json` mas não são mais importadas. 60 fps cravado nesta máquina (Intel UHD, 1080p),
+sem avisos no console, ~1,1 MB de build. O HTML, o CSS e a copy antigos ("Everything burns.", atos, HUD) estão em git:
+`git show 0a0f28f:site/index.html`, `git show 0a0f28f:site/src/style.css`.
+
+### Hero com a fênix pairando (15/10/2026)
+A página `/` agora mostra o céu + a **fênix centralizada, pairando e batendo as asas no lugar** (a pedido do usuário). Sem texto,
+HUD nem aura (continua desligada). Peças: `site/src/hero-fenix.js` (carrega `fenix-{web,lite}.glb`, põe no palco, material com
+ambiente próprio `ENV 0.5` e `METAL 0.6`), `site/src/beasts/fenix-hover.js` (o piloto do pairar) e `fenix.js` (o rig).
+- **A batida** (1 Hz, com ±4 % de variação): descida = asas abrem e abrem em leque, corpo sobe, penas arrastam para cima;
+  subida = asa flexiona (cotovelo fecha), leque fecha, corpo desce. Corpo balança e deriva devagar; cabeça fica estável contra o
+  corpo (contra-rotação do pescoço + olhar lento); pontas das fitas da cauda seguem a aceleração do corpo; pernas pendem.
+- A abertura é comandada pelo **ângulo do cotovelo** (não pela distância): pela distância o cotovelo estalava perto do braço
+  esticado. `wingBalance` compensa a escultura assimétrica (asa direita mais baixa) para a batida ler simétrica.
+- Medido no navegador: 60 fps travados (mediana 16,7 ms, p99 17,0 ms) nesta máquina com o céu e o bloom; ≤ 5°/quadro nos ossos
+  das asas; sem NaN. Ajustes por URL: `?fenix=0` (só o céu), `?m=lite`, `?camR= &camX= &camY=`, `?metal= &env=`, QA com
+  relógio congelado `__phoenix.S.t = segundos` (a batida é função pura do relógio).
+- **Inspeção (para gravar vídeo e analisar o movimento):** `site/src/hero-inspect.js`, sem nenhum texto na tela. Arrastar = girar e
+  inclinar a fênix · roda/pinça = zoom · duplo clique ou R = reiniciar a vista · setas = girar em passos · `1` `2` `3` = batida a
+  25 % / 50 % / 100 % · Espaço = pausa (continua dá para girar) · `B` = mostrar o esqueleto. Também `?speed=0.25`.
+- Enquadramento: `S = { camX: 0, camR: 3.1, camY: 0.12 }` em `main.js` (o padrão do palco deixava espaço para texto à direita).
+
+### Para trazer uma fera nova (receita)
+1. GLB do gerador (malha única ~600k tris, PBR 4096², sem rig). `node tools/inspect.mjs <glb>` mostra a estrutura.
+2. `node tools/prep-model.mjs in.glb out.glb <razão> <yaw°> <meia-altura> <erro>`: assa o transform, centra/escala, solda por
+   posição+UV (os normais facetados impedem a decimação), decima (meshoptimizer) e recalcula normais. Atenção: o yaw padrão (180)
+   e o eixo "ave olha −Z" foram feitos para a fênix; ajuste por fera.
+3. `node tools/optimize.mjs out.glb site/public/models/<nome>-web.glb 2048 2048 1024`: WebP + Meshopt (alvo ≲ 3–4 MB).
+   (`node tools/make-creature.mjs <fera>` faz 2 e 3 para web e lite — e o rig, se existir `tools/rigs/<fera>.mjs`.)
+4. No palco: GLTFLoader + MeshoptDecoder, `stage.scene.add(...)`. **Use as texturas do próprio GLB** (MeshStandardMaterial
+   como veio; nada de pintura procedural). Para a aura de chamas: `mesh.layers.enable(1)` e `stage.post.aura.enabled = true`.
+5. Orçamento (ver abaixo): 179k tris skinados custavam ~4 ms de geometria numa UHD 620; mire ≲ 100–120k tris na web e ≲ 40k
+   na lite.
+
+### Rigs das feras (15/10/2026) — uma fera por vez
+O usuário quer as 4 feras com movimento fluido e real, e conduz o trabalho **uma fera por vez**: cada uma tem um briefing
+escrito por ele (`model/<fera>/rig-<fera>.md`); terminada uma, avisa-se e ele passa o da próxima. **Não comece a próxima
+sozinho.** Estado: **dragão e fênix prontos**; tigre e tartaruga aguardam. Tudo está documentado em `tools/rigs/README.md`.
+- **Pipeline:** `node tools/make-creature.mjs <fera>` = prep → `tools/rigs/<fera>.mjs` (esqueleto + pesos → GLB skinado) →
+  optimize → `site/public/models/<fera>-{web,lite}.glb`. O controlador de movimento vive em `site/src/beasts/<fera>.js`
+  (`rigkit.js` tem o que é comum: `SplineIK`, `Strand` Verlet, IK de 2 ossos macio).
+- **Dragão:** esqueleto de ~200 juntas (espinha de 52 com pesos B-spline cúbicos, patas, bigodes, 28 mechas de crina),
+  Spline IK por 12 handles, limite de curvatura por junta, patas passivas/orbe. Laboratório ao vivo:
+  `http://localhost:5173/dragon-lab.html` (só dev). 0 erros no validador glTF; ~0,3 ms de CPU por quadro (uma única atualização de matrizes por quadro, sem alocações).
+- **Lições que valem para as próximas feras:** (1) o eixo do corpo vem do EIXO MEDIAL do volume (voxelização + campo de
+  distância + caminho de custo mínimo), não de bandas na superfície (o caminho mais curto abraça o dorso); (2) cabelo/franja
+  longe do eixo precisa de peso RÍGIDO do ponto de fixação, senão a mistura de ossos vizinhos o estica em curvas fortes; agrupe
+  mechas por **componente conectado**, não por faixas ao longo do corpo; (3) todo IK precisa de "soft" perto do alcance máximo
+  e todo osso de um limitador de velocidade angular; (4) `Float32Array` na Dijkstra gera re-empilhamento infinito: use float64;
+  (5) com ossos de rotação de repouso identidade o controlador trabalha no espaço do modelo e "guia = repouso" reproduz
+  exatamente a pose esculpida (teste de regressão barato).
+- **Fênix:** braço = eixo medial da borda de ataque; *colunas de penas* penduradas no braço giram em leque (mais longe do
+  ombro, mais ângulo); pescoço com gradiente longo; 5 fitas de cauda com `SplineIK` de 2 controladores; fios da crista em
+  Verlet. Laboratório `http://localhost:5173/fenix-lab.html`. **Dobra total não suportada** (a escultura é asa aberta):
+  `open` fica em 0,35–1,3. Detalhes e limites em `tools/rigs/README.md`.
+- Ferramentas de rig: `tools/rigs/lib/{mesh,volume,skin,strands,gltfskin}.mjs` (reuso nas outras feras),
+  `weights-debug.mjs`, `thin-debug.mjs`, `color-debug.mjs` (pinta vértices por uma expressão de x,y,z).
+
+- **Fogo da fênix (15/10/2026)** — shaders que escondem o que o rig não resolve (bordas esfarrapadas, buracos dos cortes):
+  1. aura de chamas da silhueta (`hero-post.js`) ligada na fênix (`layers.enable(1)` + `stage.post.aura.enabled`);
+  2. o fogo segue a batida (`hero-fenix.js`: `power` = função da fase; `stage.fireGain` multiplica a intensidade e
+     `uHeight` varia — flameja na descida, assenta na subida);
+  3. brasa nas pontas das penas (`beasts/fenix-fire.js`): atributo `aTip` por vértice (0..1 ao longo de pena/fita/fio,
+     lido dos pesos de pele), dissolve por ruído 3D da posição de repouso + borda incandescente no emissivo; a máscara da
+     aura usa o mesmo descarte (`post.setMaskMaterial`), então as chamas acompanham o que sobrou.
+  QA: `?fire=0` / `?aura=0` / `?burn=0.55`; `phoenix.fire.uDebug.value = 1` pinta `aTip`. Medido: 60 fps, p99 17 ms (web e lite).
+
+- **Roteiro da história (15/10/2026): `ROTEIRO.md`.** Fênix visita Tartaruga (Norte, aquece o gelo) -> Tigre (Oeste, derrete o metal)
+  -> Dragão (Leste, a alimenta até ela se consumir) -> cinza -> renascimento (só a fênix). 7 seções, ~700 vh, movimento
+  preso ao scroll e reversível, som com interruptor. Ordem de construção e riscos (asa dobrada) estão lá.
+- **Rigs do Meshy (15/10/2026):** os quatro GLBs rigados em `model/<fera>/<Fera>-RIG.glb` substituem os rigs de código.
+  Ferramentas e testes em `tools/meshy-test/` (README); a fênix tem uma corrente por pena (`rig-feathers.mjs`), clipe
+  `make-fenix-motion.mjs` e web GLB por `to-web.mjs` (`site/public/models/fenix-meshy-{web,lite}.glb`, 3,9 / 1,9 MB).
+  No hero: padrão = rig Meshy, `?rig=old` = o anterior; fogo e aura **desligados** por padrão (`?fire=1`, `?aura=1`).
+
+### Performance — o que medimos (Intel UHD 620 / i5-10210U, 1080p; vale para as novas feras)
+- **Resultado:** o hero com a fênix foi de **19,5 → 38,8 fps** (A/B intercalado, vsync ligado) com visual equivalente
+  (diff de pixels: corpo PSNR 61–71 dB; chamas estatisticamente iguais), e o governador leva a ~55–60 fps nos tiers altos.
+- **Como medir direito:** (1) vsync LIGADO (rAF livre em headless dá rajadas e números falsos); (2) `EXT_disjoint_timer_query_webgl2`
+  envolvendo cada `renderer.render` dá ms por passe; (3) carga externa (a IDE usa ~35% da GPU 3D!) varia o tempo em até ~2×:
+  compare sempre A/B intercalado e mediana; (4) `readPixels` síncrono mede o custo total, mas superestima o fps real.
+- **Armadilhas que custaram horas:** amostrar uma `DepthTexture` no ANGLE/D3D11 custou ~10 ms/quadro (use um RT de cor R32F);
+  `texture(s, uv, -100.0)` gera aviso X4713 (use `textureLod`); o custo FIXO de geometria skinada é grande (~0,7 ms por passe
+  de 130k vértices, 16 buscas de osso por vértice): cada passe extra de geometria pesa; passes full-res HDR custam ~0,9 ms cada.
+- **Técnicas que valeram** (todas com prova por diff de pixels): paleta/cor por vértice em vez de por fragmento; não ler
+  texturas que o shader sobrescreve; pré-passe de profundidade quando o fragment é pesado (−4,9 ms); corte antecipado EXATO
+  (limitar o ruído por amplitude das oitavas); ruído 3D por textura 2D (1 busca/oitava, estatística idêntica); compositor
+  fundido (cena full-res + aura/bloom em meia resolução + UM passe final); malha decimada 33% para efeitos limitados por triângulo.
+- **Governador (`stage.js`, `TIERS`):** mede o intervalo real entre quadros; 2 janelas ruins de 0,5 s descem um tier, 10 boas
+  sobem (com recuo exponencial). Tier 0 = o look aprovado; depois: céu a cada 2 quadros → passos da aura → resolução 0,9/0,8/0,7/0,6.
+
+
 
 ## Como rodar em outra máquina
 ```bash
@@ -10,17 +135,20 @@ git clone -b v2 https://github.com/Hiwan171/phoenix-awwwards && cd phoenix-awwwa
 cd site && npm install
 npm run dev            # http://localhost:5173
 
-# páginas:
-#   /               hero (loader -> vórtice de cinza -> fênix -> ignição)
-#   /sky.html       céu + fênix (laboratório)
-#   /sky.html?toy=1 céu do Shadertoy (o escolhido) atrás da fênix
+# página:
+#   /               hero: o céu do Shadertoy (a fênix v2 foi removida em 15/10/2026: ver a 1ª seção)
+#   ?q=N            fixa o tier de qualidade (0..5);  ?gov=0 desliga o governador;  ?qa=1 = sem cobertura/HUD, tier fixo
 ```
 Opcional (QA/ferramentas do GLB): `cd tools && npm install`. Os scripts de QA usam o Chrome
 instalado em `C:/Program Files/Google/Chrome/Application/chrome.exe` (ajuste o caminho se for outro).
 
 > A pasta `Awwwards-mcp/` (ferramenta de terceiros) e `node_modules/` NÃO vão no repositório.
-> O `phoenix-rigged.glb` (48 MB) também não: regenere com `tools/build-rig.mjs` a partir de
-> `assets/source/tripo_pbr_model_*.glb` (comandos no README.md).
+> (Histórico: o `phoenix-rigged.glb` de 48 MB também não ia; as ferramentas de rig da fênix foram removidas em 15/10.)
+
+---
+# HISTÓRICO — a fênix v2 (removida em 15/10/2026)
+Tudo abaixo descreve a fênix antiga e seus laboratórios. Os arquivos citados já não existem na árvore de trabalho:
+recupere-os de `0a0f28f`. Fica como referência técnica das armadilhas e decisões.
 
 ## Fênix v2 (esculpida, 179k triângulos) — o modelo vigente a partir de 14/10
 Fonte do usuário: `model/model.glb` (+ PNGs de textura PBR, **neutra/argila**: a cor será aplicada por código).

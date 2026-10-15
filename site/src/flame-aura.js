@@ -14,7 +14,7 @@ import * as THREE from 'three';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 
-const QUAD_VERT = /* glsl */`varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+export const QUAD_VERT = /* glsl */`varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
 
 const NOISE_GLSL = /* glsl */`
 uniform sampler2D tNoise;
@@ -27,7 +27,7 @@ float fbm4(vec2 p){ return fbm3(p) + 0.0625 * vn(p * 8.27 + vec2(7.7, 3.3)); }
 `;
 
 // stage 2: flame field -> RGB (premultiplied colour of the flame), at half resolution
-const FLAME_FRAG = /* glsl */`
+export const FLAME_FRAG = /* glsl */`
 uniform sampler2D tMask;
 uniform float uTime, uIntensity, uHeight, uWarp, uAspect, uSteps, uDensity, uDebug;
 varying vec2 vUv;
@@ -133,7 +133,7 @@ void main() {
   gl_FragColor = vec4(baseCol + min(fire, vec3(8.0)), base.a);
 }`;
 
-function makeNoiseTexture() {
+export function makeNoiseTexture() {
   const data = new Uint8Array(256 * 256 * 4);
   let seed = 1337; const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
   for (let i = 0; i < data.length; i++) data[i] = (rnd() * 255) | 0;

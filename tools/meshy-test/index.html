@@ -1,0 +1,76 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Meshy rig test</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0b0d;overflow:hidden;font:12px/1.4 system-ui,sans-serif;color:#cfcfd4}
+  canvas{display:block;width:100vw;height:100vh}
+  #ui{position:fixed;left:10px;top:10px;display:flex;gap:6px;flex-wrap:wrap;max-width:calc(100vw - 20px)}
+  button{background:#1b1c20;color:#cfcfd4;border:1px solid #2c2d33;border-radius:6px;padding:5px 9px;cursor:pointer;font:inherit}
+  button.on{background:#3a2a1c;border-color:#8a5a2a;color:#ffd9a8}
+  #info{position:fixed;left:10px;bottom:10px;opacity:.7}
+</style></head><body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <button id="play" class="on">pause (space)</button>
+  <button data-s="0.25">0.25x</button><button data-s="0.5">0.5x</button><button data-s="1" class="on">1x</button><button data-s="2">2x</button>
+  <button id="bones">bones (B)</button><button id="wire">wire (W)</button><button id="reset">reset view (R)</button>
+</div>
+<div id="info">loading 66 MB…</div>
+<script type="importmap">{ "imports": { "three": "/three/build/three.module.js", "three/addons/": "/three/examples/jsm/" } }</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+const Q = new URLSearchParams(location.search);
+const canvas = document.getElementById('c'), info = document.getElementById('info');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); renderer.setSize(innerWidth, innerHeight, false);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#0b0b0d');
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture; scene.environmentIntensity = 0.6;
+const key = new THREE.DirectionalLight(0xfff0dd, 2.4); key.position.set(-2, 3, 3); scene.add(key);
+const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.05, 100);
+const home = new THREE.Vector3(2.8, 1.6, 3.4), target = new THREE.Vector3(0, 0.8, 0);
+camera.position.copy(home);
+const controls = new OrbitControls(camera, canvas); controls.target.copy(target); controls.enableDamping = true; controls.update();
+const grid = new THREE.GridHelper(6, 24, 0x333339, 0x1d1d21); scene.add(grid);
+
+const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(Q.get('f') ?? '/model/Meshy_flap.glb');
+const root = gltf.scene; scene.add(root);
+root.traverse((o) => { if (o.isSkinnedMesh) o.frustumCulled = false; });
+const mixer = new THREE.AnimationMixer(root);
+const clip = gltf.animations.find((c) => c.name === 'Flap') ?? gltf.animations[0];
+const action = clip ? mixer.clipAction(clip) : null; action?.play();
+let speed = 1, playing = true, helper = null, wire = false;
+const bones = []; root.traverse((o) => { if (o.isBone) bones.push(o); });
+let tris = 0; root.traverse((o) => { if (o.isMesh) tris += (o.geometry.index?.count ?? o.geometry.attributes.position.count) / 3; });
+info.textContent = `${bones.length} bones · ${(tris / 1000) | 0}k tris · clip ${clip ? `${clip.name} ${clip.duration.toFixed(2)}s` : 'none'}`;
+
+const $ = (s) => document.querySelector(s);
+const setPlay = (v) => { playing = v; $('#play').textContent = v ? 'pause (space)' : 'play (space)'; $('#play').classList.toggle('on', v); };
+$('#play').onclick = () => setPlay(!playing);
+document.querySelectorAll('button[data-s]').forEach((b) => b.onclick = () => { speed = +b.dataset.s; document.querySelectorAll('button[data-s]').forEach((x) => x.classList.toggle('on', x === b)); });
+const toggleBones = () => {
+  if (!helper) { helper = new THREE.SkeletonHelper(root); helper.material.depthTest = false; helper.material.transparent = true; helper.renderOrder = 9; helper.material.color.set(0x00e5ff); scene.add(helper); }
+  else helper.visible = !helper.visible;
+  $('#bones').classList.toggle('on', helper.visible);
+};
+const toggleWire = () => { wire = !wire; root.traverse((o) => { if (o.isMesh) o.material.wireframe = wire; }); $('#wire').classList.toggle('on', wire); };
+const reset = () => { camera.position.copy(home); controls.target.copy(target); controls.update(); };
+$('#bones').onclick = toggleBones; $('#wire').onclick = toggleWire; $('#reset').onclick = reset;
+addEventListener('keydown', (e) => {
+  if (e.code === 'Space') { e.preventDefault(); setPlay(!playing); }
+  if (e.code === 'KeyB') toggleBones(); if (e.code === 'KeyW') toggleWire(); if (e.code === 'KeyR') reset();
+  if (e.code === 'Digit1') speed = 0.25; if (e.code === 'Digit2') speed = 0.5; if (e.code === 'Digit3') speed = 1;
+});
+addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if (playing) mixer.update(dt * speed);
+  controls.update(); renderer.render(scene, camera);
+});
+window.__t = { mixer, root, camera, controls, setPlay, THREE, scene, renderer };
+window.__ready = true;
+</script></body></html>

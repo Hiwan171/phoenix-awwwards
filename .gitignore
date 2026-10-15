@@ -18,8 +18,20 @@ Thumbs.db
 # geradores de QA (saídas)
 tools/_out/
 
-# intermediates of tools/make-phoenix.sh (regenerable)
+# beasts: the raw generator output is ~80 MB per GLB (+ ~35 MB of loose PNGs that are copies of what the GLB embeds),
+# and GitHub rejects files over 100 MB. Only the web GLBs in site/public/models/ are versioned; keep the raws somewhere safe
+# (or move them to Git LFS and delete these lines).  Rebuild everything with:  cd tools && node make-creature.mjs all
+model/*/*.glb
+# the Meshy-rigged sources travel with the repo through Git LFS (.gitattributes)
+!model/*/*-RIG.glb
+model/*/*.png
+model/*/build/
+
+# intermediates of the old phoenix pipeline (regenerable)
 model/phoenix-prep*.glb
 model/phoenix-rigged*.glb
 model/_*.json
 model/_*.glb
+
+# third-party asset used only for a rig study (licence unknown): never versioned
+v20.glb

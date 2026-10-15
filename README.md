@@ -1,11 +1,13 @@
 # Phoenix — A Cycle in Five Acts
 
-Site de scrollytelling 3D (WebGL / Three.js) feito para submissão ao Awwwards.
-Uma fênix esculpida, rigada e animada, colorida por código (plumagem procedural) e com aura de chamas em GLSL,
-voa diante de um céu de entardecer num hero cinematográfico.
+Site de scrollytelling 3D (WebGL / Three.js) feito para submissão ao Awwwards (meta: Honorable Mention).
+Hoje a página é **só o shader do céu de entardecer** (Shadertoy) com bloom, em tela cheia, e um governador de qualidade: o hero
+será refeito do zero. A cena inicial terá uma
+**fênix nova**, e o dragão e outras feras entram em outras cenas, todas no mesmo estilo (a textura própria do dragão).
 
-> **Para retomar o trabalho, leia [HANDOFF.md](HANDOFF.md)** (estado, decisões e pendências)
-> e depois [DESIGN-BRIEF.md](DESIGN-BRIEF.md).
+> **Para retomar o trabalho, leia [HANDOFF.md](HANDOFF.md)** (estado, decisões, receita para trazer uma fera, o que medimos de
+> performance) e depois [DESIGN-BRIEF.md](DESIGN-BRIEF.md).
+> A fênix v2 anterior foi removida em 15/10/2026; está no git (`0a0f28f` / `origin/v2`).
 
 ## Rodar
 ```bash
@@ -14,29 +16,31 @@ npm install
 npm run dev        # http://localhost:5173
 ```
 
-| Página | O que é |
+| URL | O que é |
 |---|---|
-| `/` | hero: céu do entardecer (Shadertoy) + fênix v2 colorida, com aura de chamas |
-| `/sky.html` | laboratório (sliders do céu procedural; `?toy=1` = o céu do hero + `?look=`, `?aura=`, `?pl=`, `?dbg=`...) |
-| `/sky.html?toy=1` | céu do Shadertoy (o escolhido) atrás da fênix |
-| `/fly.html` | voo: a fênix cruza a câmera, mergulha e sobe, guiada pelo scroll (Espaço = voo automático) |
+| `/` | o shader do céu do Shadertoy com bloom, sozinho, em tela cheia (sem transição, texto nem HUD) |
+| `/?q=N` | fixa o tier de qualidade (0 = look aprovado … 5 = o mais leve) |
+| `/?gov=0` | desliga o governador de qualidade (fica no tier 0) |
+| `/?qa=1` | tier fixo e relógio congelável (`S.t`): para capturas determinísticas |
 
 ## Estrutura
 ```
 site/            app Vite (Three.js + GSAP): o que vai para produção
-  src/           main.js (boot), stage.js (cena do hero), phoenix-material.js, plumage.js, flame-aura.js,
-                 toy-sky.js + toy/sky.glsl (céu), looks.js, shaders.js, sky-test.js (laboratório)
+  src/           main.js (boot), stage.js (palco: céu, luz, compositor, governador), hero-post.js (pós fundido),
+                 flame-aura.js (campo de chama da aura), toy-sky.js + toy/sky.glsl (céu), looks.js, style.css
   _archive/      intro-ember (abertura antiga) e scroll-slice (atos antigos): não usar sem pedir
-tools/           scripts Node: prep + rig do GLB (make-phoenix.sh), inspeção, QA em navegador headless
-model/           GLB esculpido bruto (fonte do rig) + intermediários (ignorados pelo git)
-assets/source/   GLB da primeira fênix (Tripo), legado
+tools/           scripts Node: prep-model (solda + decima GLB), optimize (WebP + Meshopt), inspect, QA em navegador headless
+model/dragon/    o dragão (GLB bruto do gerador, ainda sem otimização para web)
 ```
 
-## Gerar a fênix (modelo → GLBs web/lite)
+## Trazer uma fera nova (GLB do gerador → web)
 ```bash
 cd tools && npm install
-bash make-phoenix.sh ../model/model.glb   # prepara, faz o rig, otimiza -> site/public/models/phoenix-v2-{web,lite}.glb
+node inspect.mjs ../model/dragon/dragon.glb                      # estrutura, tamanho, texturas
+node prep-model.mjs ../model/dragon/dragon.glb out.glb 0.2 0 0.5 0.02   # solda + decima (razão, yaw°, meia-altura, erro)
+node optimize.mjs out.glb ../site/public/models/dragon-web.glb 2048 2048 1024   # WebP + Meshopt
 ```
+Detalhes e orçamento de triângulos em [HANDOFF.md](HANDOFF.md).
 
 ## Atenção: licença do shader do céu
 `site/src/toy/sky.glsl` vem do Shadertoy (`XsBXDc`). Autor e licença ainda **não foram confirmados**

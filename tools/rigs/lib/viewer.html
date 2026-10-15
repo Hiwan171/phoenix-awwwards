@@ -1,0 +1,81 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>rig view</title>
+<style>html,body{margin:0;height:100%;background:#1a1a1a;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+<script type="importmap">{ "imports": { "three": "/repo/site/node_modules/three/build/three.module.js", "three/addons/": "/repo/site/node_modules/three/examples/jsm/" } }</script>
+</head><body><canvas id="c"></canvas>
+<script type="module">
+// Orthographic / perspective inspection page for rigs. Works in canonical units (no re-centring, no rescale).
+//   ?f=<glb under /repo>  &v=side|front|top|q34|back34   &ortho=1  &zoom=<visible height>  &cx=&cy=  (ortho centre, in view-plane units)
+//   &skel=<json under /repo or /scratch>  overlay {lines:[{pts,color}], points:[{p,color,size}]}
+//   &mesh=0 hides the mesh   &wire=1  &ctrl=<module under /repo exporting default (THREE, gltf)=>{pose(params)}>   &pose=<json>
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+const Q = new URLSearchParams(location.search);
+const view = Q.get('v') ?? 'side', ortho = Q.get('ortho') === '1', zoom = +(Q.get('zoom') ?? 1.3);
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1); renderer.setSize(innerWidth, innerHeight, false);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.95;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(Q.get('bgc') ?? '#262626');
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture; scene.environmentIntensity = 0.45;
+const key = new THREE.DirectionalLight(0xffe9cf, 2.6); key.position.set(-2.6, 2.4, -1.2); scene.add(key);
+const rim = new THREE.DirectionalLight(0xffc27a, 1.6); rim.position.set(0.8, 0.8, 5.9); scene.add(rim);
+scene.add(new THREE.HemisphereLight(0xdfe6ee, 0x3a2418, 0.5));
+
+const aspect = innerWidth / innerHeight;
+let camera;
+const R = 8;
+const DIRS = { side: [1, 0, 0], front: [0, 0, -1], back: [0, 0, 1], top: [0, 1, 0], q34: [0.62, 0.30, -0.72], back34: [-0.62, 0.25, 0.72], low: [0.5, -0.25, -0.8] };
+const dir = new THREE.Vector3(...(DIRS[view] ?? DIRS.side)).normalize();
+if (ortho) {
+  const h = zoom, w = h * aspect;
+  camera = new THREE.OrthographicCamera(-w / 2, w / 2, h / 2, -h / 2, 0.01, 100);
+} else camera = new THREE.PerspectiveCamera(30, aspect, 0.05, 100);
+const cx = +(Q.get('cx') ?? 0), cy = +(Q.get('cy') ?? 0);
+const target = new THREE.Vector3(0, 0, 0);
+camera.up.set(0, 1, 0); if (view === 'top') camera.up.set(0, 0, -1);
+camera.position.copy(dir).multiplyScalar(R);
+if (Q.get('cam')) { const c = Q.get('cam').split(',').map(Number), t = (Q.get('tgt') ?? '0,0,0').split(',').map(Number), u = (Q.get('up') ?? '0,1,0').split(',').map(Number); camera.up.set(...u); target.set(...t); camera.position.set(...c); }
+camera.lookAt(target);
+if (ortho && (cx || cy)) {         // pan in the view plane
+  camera.updateMatrixWorld(true);
+  const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0), up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+  camera.position.addScaledVector(right, cx).addScaledVector(up, cy); camera.lookAt(camera.position.clone().addScaledVector(dir, -R));
+}
+if (!ortho) camera.lookAt(0, 0, 0);
+
+const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(Q.get('f'));
+scene.add(gltf.scene);
+gltf.scene.traverse((o) => { if (o.isMesh || o.isSkinnedMesh) { o.frustumCulled = false; if (Q.get('mesh') === '0') o.visible = false; if (Q.get('vcol') === '1' && o.geometry.attributes.color) { o.material = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }); } if (Q.get('wire') === '1') { o.material = new THREE.MeshBasicMaterial({ color: 0x99ccff, wireframe: true }); } } });
+
+// controller + pose
+let ctrl = null;
+if (Q.get('ctrl')) {
+  const mod = await import(Q.get('ctrl'));
+  ctrl = await (mod.default ?? mod.create)(THREE, gltf, scene);
+}
+window.__rig = { THREE, gltf, scene, camera, renderer, ctrl };
+window.__render = () => { scene.updateMatrixWorld(true); renderer.render(scene, camera); };
+window.__setPose = async (fn, ...a) => { await ctrl.pose(...a); window.__render(); };
+
+// overlay
+async function overlay(url) {
+  const o = await (await fetch(url)).json();
+  const grp = new THREE.Group(); grp.renderOrder = 999;
+  for (const L of o.lines ?? []) {
+    const g = new THREE.BufferGeometry().setFromPoints(L.pts.map((p) => new THREE.Vector3(...p)));
+    const m = new THREE.LineBasicMaterial({ color: L.color ?? '#ffff00', depthTest: false, transparent: true });
+    const line = new THREE.Line(g, m); line.renderOrder = 999; grp.add(line);
+  }
+  for (const P of o.points ?? []) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(P.size ?? 0.006, 8, 6), new THREE.MeshBasicMaterial({ color: P.color ?? '#ff3030', depthTest: false }));
+    m.position.set(...P.p); m.renderOrder = 1000; grp.add(m);
+  }
+  scene.add(grp);
+}
+if (Q.get('skel')) await overlay(Q.get('skel'));
+window.__render();
+window.__done = true;
+</script></body></html>

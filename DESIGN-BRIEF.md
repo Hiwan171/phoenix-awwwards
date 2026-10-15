@@ -1,5 +1,7 @@
 # DESIGN BRIEF — Phoenix: *A Cycle in Five Acts* (título de trabalho)
 
+> **15/10/2026:** a fênix v2 foi removida; a cena inicial terá uma fênix NOVA no estilo do dragão e as demais feras entram em
+> outras cenas (ver `HANDOFF.md`). Os atos/conteúdo abaixo ainda precisam ser reescritos para esse mundo.
 > Objetivo: Honorable Mention no Awwwards. Peça de showcase, sem cliente.
 > Estado: **proposta v1 para aprovação**. Tudo marcado `[REF]` vem de evidência das referências;
 > tudo marcado `[PROPOSTA]` é decisão criativa minha, ainda sem prova externa.

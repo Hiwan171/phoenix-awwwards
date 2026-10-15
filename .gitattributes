@@ -3,3 +3,6 @@
 *.png binary
 *.webp binary
 *.woff2 binary
+
+# the four Meshy-rigged sources (62-64 MB each): Git LFS, so they can travel with the repo without bloating it
+model/*/*-RIG.glb filter=lfs diff=lfs merge=lfs -text

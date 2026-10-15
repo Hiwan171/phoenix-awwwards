@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="google" content="notranslate">
+<title>Dragon rig lab</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0b0a0c; overflow: hidden; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; color: #e9dfcf; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #panel { position: fixed; top: 10px; left: 10px; width: 250px; padding: 10px 12px; background: rgba(14, 12, 14, .78); border: 1px solid rgba(255, 220, 170, .18); border-radius: 8px; backdrop-filter: blur(6px); }
+  #panel h1 { margin: 0 0 8px; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: #f2c25a; font-weight: 600; }
+  #panel label { display: grid; grid-template-columns: 1fr 52px; gap: 2px 8px; margin: 5px 0; }
+  #panel label span { color: #bfb3a0; }
+  #panel output { text-align: right; color: #f2e6cf; }
+  #panel input[type=range] { grid-column: 1 / 3; width: 100%; accent-color: #f2a43a; }
+  #panel select, #panel button { width: 100%; margin: 4px 0; background: #1d1a1d; color: #e9dfcf; border: 1px solid rgba(255, 220, 170, .22); border-radius: 5px; padding: 5px 6px; font: inherit; }
+  #panel .row { display: flex; gap: 8px; align-items: center; margin: 5px 0; }
+  #stat { position: fixed; right: 10px; bottom: 8px; color: #8d8272; }
+  #hint { position: fixed; left: 10px; bottom: 8px; color: #8d8272; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="panel">
+  <h1>Qinglong rig</h1>
+  <label><span>undulation</span><output id="o-amp"></output><input id="amp" type="range" min="0" max="3" step="0.01" value="1.2"></label>
+  <label><span>wavelength</span><output id="o-wl"></output><input id="wl" type="range" min="0.7" max="3" step="0.01" value="1.55"></label>
+  <label><span>frequency (Hz)</span><output id="o-fq"></output><input id="fq" type="range" min="0" max="1.6" step="0.01" value="0.55"></label>
+  <label><span>head yaw</span><output id="o-hy"></output><input id="hy" type="range" min="-1.2" max="1.2" step="0.01" value="0"></label>
+  <label><span>head pitch</span><output id="o-hp"></output><input id="hp" type="range" min="-0.8" max="0.8" step="0.01" value="0"></label>
+  <label><span>wind</span><output id="o-wd"></output><input id="wd" type="range" min="-14" max="14" step="0.1" value="0"></label>
+  <label><span>orb grip</span><output id="o-ob"></output><input id="ob" type="range" min="0" max="1" step="0.01" value="0"></label>
+  <select id="legs"><option value="passive">legs: passive (dangle)</option><option value="rest">legs: rest (sculpt)</option><option value="orb">legs: hold the orb</option></select>
+  <div class="row"><input id="strands" type="checkbox" checked><span>whiskers + mane physics</span></div>
+  <div class="row"><input id="orbshow" type="checkbox"><span>show orb</span></div>
+  <div class="row"><input id="auto" type="checkbox" checked><span>run</span></div>
+  <button id="reset">reset</button>
+</div>
+<div id="hint">drag = orbit · wheel = zoom · right drag = pan</div>
+<div id="stat"></div>
+<script type="module" src="/src/dragon-lab.js"></script>
+</body>
+</html>
