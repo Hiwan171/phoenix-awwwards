@@ -41,6 +41,7 @@ export const FOLD = {
   fan: 0.25,         // feathers close like a fan about their roots (rad per unit of position along the arm)
   fanBias: 0.0,
   tuckLegs: 1,
+  rollA: 0.25, rollB: 0.42,  // radians: roll of each wing about its own axis (the sculpt's two wings are not mirror images; found in the lab)
   backK: 0.7,        // how much of its wing's shoulder movement a back feather follows (measured: see the lab)
 };
 
@@ -83,9 +84,10 @@ function gazeAt(t, out) {
 const RATE_DAMP = (hz) => { const x = Math.max(0, hz - 1.6) / 1.2; return 1 / (1 + 0.55 * x * x); };
 const num = (name) => +name.replace(/\D/g, '');
 // segment angles (degrees above the horizontal, forward) of the flight posture, chest to head; the stretch flattens the neck
+export const HEAD_TARGET = { v: 121 };      // calibrated by measuring the BEAK tip: the tip sits ~26 degrees below the head bone's axis, so ~104 puts the beak ~10 degrees below the horizon
 // The head joint's bone is VERTICAL at rest (the standing bird's neck and head), the beak is perpendicular to it: a head segment at ~85
 // degrees keeps the beak pointing FORWARD (horizontal). The neck rises in between (an S), so the head sits high and looks ahead.
-const FLIGHT_THETA = [-8, -6, -3, 0, 8, 18, 28, 38, 50, 72, 84];
+const FLIGHT_THETA = [-8, -6, -3, 0, 8, 18, 28, 38, 62, HEAD_TARGET.v - 4, HEAD_TARGET.v];
 const WING_A = [36, 35, 34, 50], WING_B = [39, 38, 37, 55];     // shoulder, arm, forearm, hand (A at z < 0, B at z > 0)
 const LEGS = [[6, 5, 4, 3, 2], [13, 12, 11, 10, 9]];
 const TAILS = [[19, 18, 17, 16, 15, 14], [25, 24, 23, 22, 21, 20], [31, 30, 29, 28, 27, 26]];
@@ -133,7 +135,7 @@ export function createFenixFlight(model, opts = {}) {
     const arc = (a, b, o) => { const d = a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; qset(o, a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0], 1 + d); return qnorm(o); };
     for (const w of wings) {
       const mine = w.side === wings[1].side ? dB : dA, target = w.side === wings[1].side ? t : [t[0], t[1], -t[2]];
-      arc(mine, target, w.bal);
+      arc(mine, target, w.bal); w.axis = target;
     }
   }
   wings.forEach((w, wi) => {
@@ -208,7 +210,9 @@ export function createFenixFlight(model, opts = {}) {
         if (j === 0) {                                                // shoulder: balance, sweep back, lower (closing), beat
           ry(A, s * (0.14 * fb + P.sweep * 0.55 * (1 - cl) + fold.sweep * cl));
           rx(B, -s * (raise - bankDiff * (1 - cl)) + s * fold.down * cl);
-          qmul(C, A, w.bal); return qmul(out, B, C);
+          const rollA = (w.side === wings[1].side ? fold.rollB : fold.rollA) * (1 - 0.0 * cl);
+          qaxis(D, w.axis[0], w.axis[1], w.axis[2], rollA); qmul(E, D, w.bal);          // the wing's own roll, after the balance
+          qmul(C, A, E); return qmul(out, B, C);
         }
         // arm, forearm, hand, second branch: each adds its share of the beat, the sweep and (closing) the Z-fold
         const share = [[0, 0], [0.10, 0.18], [0.16, 0.30], [0.18, 0.32], [0.18, 0.32]][j];
@@ -294,7 +298,7 @@ export function createFenixFlight(model, opts = {}) {
         // each segment of the chain is posed to an ABSOLUTE direction: standing (rest) .. flight (horizontal body, stretched neck).
         // Rz(+) lowers the front (the bird faces -x), Ry(+) turns it to the left, Rx(+) rolls it right-wing-down.
         const j = r.j, f = P.fly, st = P.stretch, neckw = j >= 4 ? (j - 3) / (K - 4) : 0;
-        const target = FLIGHT_THETA[Math.min(j, FLIGHT_THETA.length - 1)] + (j >= 4 ? st * 12 * neckw * (j >= K - 2 ? 0 : 1) : -st * 3);   // stretched: the neck reaches further forward, the body flattens
+        const target = FLIGHT_THETA[Math.min(j, FLIGHT_THETA.length - 1)] + (j >= 4 ? st * 12 * neckw * (j >= K - 3 ? 0 : 1) : -st * 3);   // stretched: the neck reaches further forward, the body flattens
         const th = (restTheta[j] - target) * f;                                              // degrees
         // the head and the upper neck: a living head. hw = how much of the head's final orientation this segment carries (0 body .. 1 head)
         const hw = j >= K - 5 ? HEAD_W[j - (K - 5)] : 0;
@@ -311,7 +315,7 @@ export function createFenixFlight(model, opts = {}) {
         rz(A, ((th + wave + pit + nk + nk2) * Math.PI) / 180);
         ry(B, yaw - P.bank * 0.28 * (j / K) + (j < K - 5 ? 0.02 * Math.sin(TAU * (t / 6) - 0.5 * j) : 0));
         rx(D, roll);
-        qmul(C, A, B); qmul(E, C, D); return qset(out, E[0], E[1], E[2], E[3]);
+        qmul(C, B, A); qmul(E, C, D); return qset(out, E[0], E[1], E[2], E[3]);        // yaw (outer) * pitch * roll (inner): a turned head keeps its elevation
       }
       default: return qset(out, base[0], base[1], base[2], base[3]);
     }

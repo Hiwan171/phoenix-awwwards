@@ -24,7 +24,7 @@ const KEYS = [
   { w: 2,   beats: 9.0,  flap: 0.90, open: 1.00, sweep: 0.10, legs: 0.85, tail: 0.35, fly: 1.00, stretch: 0.50, alert: 0.55, ground: 0.00, pitchBias: 0.08 },
   { w: 3,   beats: 14.0, flap: 0.45, open: 1.00, sweep: 0.00, legs: 0.85, tail: 0.50, fly: 1.00, stretch: 0.60, alert: 0.50, ground: 0.00, pitchBias: 0.00 },   // level, easing into the glide
   { w: 4,   beats: 15.5, flap: 0.04, open: 1.00, sweep: 0.00, legs: 0.85, tail: 0.80, fly: 1.00, stretch: 1.00, alert: 0.80, ground: 0.00, pitchBias: 0.00 },   // glide: wings still, tail fanned
-  { w: 5,   beats: 15.5, flap: 0.00, open: 0.55, sweep: 0.85, legs: 1.00, tail: 0.15, fly: 1.00, stretch: 1.00, alert: 0.10, ground: 0.00, pitchBias: -0.08 },   // dive: wings half closed and swept back
+  { w: 5,   beats: 15.5, flap: 0.00, open: 0.68, sweep: 0.62, legs: 1.00, tail: 0.15, fly: 1.00, stretch: 1.00, alert: 0.10, ground: 0.00, pitchBias: -0.08 },   // dive: wings half closed and swept back
   { w: 6,   beats: 19.0, flap: 1.00, open: 1.00, sweep: 0.20, legs: 0.80, tail: 0.90, fly: 0.90, stretch: 0.50, alert: 0.50, ground: 0.00, pitchBias: 0.28 },   // pull up: wings open, strong beats
   { w: 7,   beats: 23.0, flap: 0.90, open: 1.00, sweep: 0.00, legs: -0.35, tail: 1.00, fly: 0.55, stretch: 0.20, alert: 0.70, ground: 0.00, pitchBias: 0.12 },  // approach: legs reach forward
   { w: 8,   beats: 26.0, flap: 1.00, open: 1.00, sweep: 0.00, legs: -1.00, tail: 1.00, fly: 0.25, stretch: 0.00, alert: 0.60, ground: 0.15, pitchBias: 0.55 },  // flare: braking beats

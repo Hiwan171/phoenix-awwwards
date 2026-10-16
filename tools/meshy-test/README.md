@@ -157,3 +157,19 @@ in flight posture, 0.42 % in the swept dive; no pops along the path; 60 fps; ~1.
 - Landing: `P.ground` (timeline key) puts the lowest foot ON the ground whatever the pose.
 - NOT done: eyes and beak. The model has no eyelid or jaw geometry (the eye is baked in the texture; the closed beak has no mouth
   interior), so a blink or an opening beak would need a remodel or a texture-space eyelid; see the report.
+
+### Calibrating by measurement, blink, symmetric wings (16/10/2026, third recording)
+- The head was measured, not eyeballed: the beak tip (frontmost head vertex, found in the bind pose) vs the head joint, in WORLD pitch,
+  along the whole flight (`lab-beak2`-style script). Standing, the tip is 25.7 degrees below the head bone's axis, so the targets were
+  calibrated until the beak sat ~10 degrees below the horizon in level flight: mean -13 degrees, range -34..+4 over the flight (it was
+  -40 mean, -68 at worst). `lookPitch` from the path is 0 (the head does not look down unless a scene asks). The yaw lead used to
+  couple into pitch (+5 degrees down at 25 degrees of yaw) because the rotations were composed pitch-then-yaw; now yaw (outer) *
+  pitch * roll (inner).
+- Eyelids by shader (`beasts/fenix-eyes.js`): the eyes are painted in the base colour map, so a blink is a patch of the texture. The
+  UV ellipses were found by casting rays through the eyes in close-up renders: left (0.6563, 0.6520), right (0.0735, 0.9795), radius
+  ~0.0034. Inside them the colour closes toward the skin sampled around (four taps) with a darker lid line; `blinkAt(t)` is a pure
+  function of time (a blink every 2.4-6 s, sometimes double, 0.16 s). Cost not measurable (A/B interleaved: same noise either way).
+- The two wings are not mirror images: in the front view the left one lay flat and the right one stood at ~35 degrees even after the
+  axis balance, because the sculpt's wing PLANES are rolled differently. `fold.rollA` / `rollB` (0.25 / 0.42 rad) roll each wing about
+  its own axis after the balance: symmetric dihedral in glide, on the up and down strokes and in the dive (checked front and top).
+- Dive: open 0.68 / sweep 0.62 (was 0.55 / 0.85, which crumpled the feathers in the pull-out).

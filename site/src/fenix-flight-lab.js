@@ -10,6 +10,7 @@ import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { createFenixFlight, FOLD, FLIGHT_DEFAULTS } from './beasts/fenix-flight.js';
 import { createDemoFlight } from './beasts/flight-demo.js';
 import { chaseCamera } from './beasts/flight-path.js';
+import { applyEyes, blinkAt } from './beasts/fenix-eyes.js';
 
 const Q = new URLSearchParams(location.search);
 const variant = Q.get('m') === 'lite' ? 'lite' : 'web';
@@ -59,6 +60,7 @@ const holder = new THREE.Group();                       // orients and scales th
 holder.rotation.y = -Math.PI / 2; holder.scale.setScalar(1 / 1.7); holder.position.y = -0.85 / 1.7;
 holder.add(model);
 const bird = new THREE.Group(); bird.add(holder); scene.add(bird);
+const eyes = Q.get('eyes') === '0' ? { set() {}, uniforms: {} } : applyEyes(skinned.material);
 const flight = createFenixFlight(model);
 const footBones = ['Bone_002', 'Bone_009'].map((nm) => flight.bones[flight.byName.get(nm)]), tmpV = new THREE.Vector3();
 const FOOT_MARGIN = 0.012;                                // the toe tips are a little below the foot joints (scaled units: the bird is 1 tall)
@@ -76,7 +78,7 @@ function paramsAt(uu) {
   const e = 0.004, dB = (demo.timeline.at(Math.min(1, uu + e)).beats - demo.timeline.at(Math.max(0, uu - e)).beats) / (2 * e);   // beats per unit of progress
   return {
     t: uu * demo.seconds, phase: k.beats, flap: k.flap, open: k.open, sweep: k.sweep, legs: k.legs, tail: k.tail, fly: k.fly, stretch: k.stretch,
-    bank: b.bank, pitch: b.pitch + k.pitchBias, pitchRate: b.pitchRate * 0.08, yawRate: b.yawRate * 0.08, lookYaw: Math.max(-0.55, Math.min(0.55, b.yawRate * 0.055)), lookPitch: Math.max(-0.2, Math.min(0.2, -b.pitchRate * 0.01)), alert: k.alert, ground: k.ground, rate: Math.abs(dB * uVel), load: Math.max(-1, Math.min(1, b.pitchRate * 0.08 * 1.2)),
+    bank: b.bank, pitch: b.pitch + k.pitchBias, pitchRate: b.pitchRate * 0.08, yawRate: b.yawRate * 0.08, lookYaw: Math.max(-0.55, Math.min(0.55, b.yawRate * 0.04)), lookPitch: 0, alert: k.alert, ground: k.ground, rate: Math.abs(dB * uVel), load: Math.max(-1, Math.min(1, b.pitchRate * 0.08 * 1.2)),
   };
 }
 function applyU(uu) {
@@ -84,6 +86,7 @@ function applyU(uu) {
   bird.position.copy(b.pos); bird.quaternion.copy(b.quat);
   bird.rotateX(P.pitch - b.pitch);                       // the timeline's body pitch on top of the path's own (nose up to brake, to pull up)
   flight.pose(P);
+  eyes.set(blinkAt(P.t));
   // ground contact: where the timeline says she is on the ground, the lowest foot is put ON the ground (y = 0), whatever the pose
   if (P.ground > 0.001) {
     bird.updateMatrixWorld(true);
@@ -96,6 +99,7 @@ function applyManual() {
   bird.position.set(0, 0, 0); bird.quaternion.identity();
   bird.rotation.set(0, 0, 0); bird.rotateX(manual.pitch); bird.rotateZ(-manual.bank);
   flight.pose({ ...manual, t: performance.now() / 1000 });
+  if (manual.blink == null) eyes.set(blinkAt(performance.now() / 1000)); else eyes.set(manual.blink);
 }
 
 // ── cameras: all of them follow the bird; "free" lets you drag to turn around her while she flies (the wheel keeps scrolling the
@@ -193,7 +197,7 @@ requestAnimationFrame(frame);
 
 // QA hooks (headless scripts)
 window.__lab = {
-  THREE, scene, camera, bird, flight, demo, skinned, manual,
+  THREE, scene, camera, bird, flight, demo, skinned, manual, eyes,
   setU(uu) { uVel = 0; hold = true; mode = 'scroll'; autoplay = false; u = uu; const r = applyU(uu); placeCamera(r.b); hud(r.P, r.b); renderer.render(scene, camera); return r; },
   setManual(p, cam) { hold = true; setMode('manual'); Object.assign(manual, p); applyManual(); if (cam) { camera.position.set(...cam.pos); controls.target.set(...(cam.target ?? [0, 0, 0])); camera.lookAt(controls.target); controls.enabled = false; } renderer.render(scene, camera); },
   setCamMode(m) { camMode = m; V.freeInit = false; },
