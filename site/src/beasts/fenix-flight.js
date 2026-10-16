@@ -43,6 +43,9 @@ export const FOLD = {
   tuckLegs: 1,
   rollA: 0.25, rollB: 0.42,  // radians: roll of each wing about its own axis (the sculpt's two wings are not mirror images; found in the lab)
   corrK: 1,
+  wingFlex: 0.35,       // how much the wing bends along its length (arm/forearm/hand shares of the beat, wave, load): 0 = one rigid piece. 1 bent it
+                        // 34 degrees at the elbow ("asa quebrada no meio", measured); 0.35 -> ~13 degrees, one wing that flexes
+  featherFlex: 1,       // scale of the wing feathers' own wave / flutter
   shoulderBody: 0,      // how much the SHOULDER follows the body's rotation where it is attached (the arm joint gives it back, so the rest of the
                         // wing keeps its orientation): the root of the wing stays on the body (armpit) in the flight posture             // share of the symmetry correction applied at the shoulder (the rest at the arm): 1 = all at the shoulder
   backK: 0.7,
@@ -244,7 +247,8 @@ export function createFenixFlight(model, opts = {}) {
         const zf = [0, fold.arm, fold.forearm, fold.hand, fold.hand][j];
         const wave = Math.sin(TAU * (ph - 0.04 * j)) * 0.04 * fl * (1 - cl);
         const ld = P.load * (0.5 + 0.5 * (1 - cl));                    // the wing carries the load: the tips bend up in a pull-up, float in a push-over
-        rx(A, -s * share[0] * raise + wave - s * ld * [0, 0.10, 0.18, 0.26, 0.26][j]); ry(B, s * (share[1] * fb + zf * cl + 0.12 * P.sweep * (1 - cl)));
+        const wf = fold.wingFlex;
+        rx(A, (-s * share[0] * raise + wave - s * ld * [0, 0.10, 0.18, 0.26, 0.26][j]) * wf); ry(B, s * (share[1] * fb * wf + zf * cl + 0.12 * P.sweep * (1 - cl)));
         qmul(C, A, B);
         if (j === 1) {                                                   // the arm gives the body's share back: the outer wing keeps the wing's own orientation
           const b1 = fold.shoulderBody > 0 ? w.Wsh : base;
@@ -261,8 +265,9 @@ export function createFenixFlight(model, opts = {}) {
         if (f.side) {                                                 // wing feather: the wake of the beat, a flutter, the fan
           const s = f.side, open = 1 - cl;
           const trail = Math.sin(TAU * (ph - f.lagBeat) - 0.45 * j);
-          rx(A, -s * f.A * g * 0.9 * trail * fl * (0.4 + 0.6 * open));
-          ry(B, f.A * g * 0.6 * flutter * (0.5 + 0.5 * open));
+          const ck = Math.min(1, 3 / f.K) * fold.featherFlex;               // per joint: a 9-joint feather must not bend 3x more than a 3-joint one (it compounds)
+          rx(A, -s * f.A * g * 0.9 * trail * fl * (0.4 + 0.6 * open) * ck);
+          ry(B, f.A * g * 0.6 * flutter * (0.5 + 0.5 * open) * ck);
           qmul(C, A, B);
           if (j === 0) {                                              // the fan closes about the feather's ROOT
             ry(D, s * fold.fan * cl * (f.s - 0.35 + fold.fanBias)); qmul(E, C, D); return qmul(out, base, E);

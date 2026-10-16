@@ -249,3 +249,12 @@ higher and swept back), so the shoulders no longer matched. Now:
 Stretched edges: 0.20-0.24 % (none) / 0.26-0.30 % (this soft seam) / 0.26-0.33 % (the wide seam). Wing x wing and tail x body unchanged.
 Lesson: a metric that says "gap closed" (median of contact pairs) is not the user's eye: gluing the lower wing layer closed the gap and
 froze the wing. Always render the result at the user's camera distance before declaring a fix.
+
+### Wing broken in the middle, wide shoulder (16/10/2026, recording `2026-10-16 15-39-47`)
+- "Asa quebrada no meio": measured (`lab-kink`: angle between inner wing shoulder->forearm and outer wing forearm->hand tip, change from
+  rest): up to 34 degrees over the flight. The arm / forearm / hand each added their share of the beat, the upstroke fold, the wave and
+  the load: the outer wing bent like a hinge. `fold.wingFlex = 0.35` scales those shares: 14 degrees, one wing that flexes. Wing feather
+  chains got the same per-joint bound as the tail (`min(1, 3/K)`, `fold.featherFlex`).
+- "Ombro largo / borrado": the soft seam still stretched the shoulder skin (smear seen at the beat bottom from behind). SEAM_MAX
+  0.6 -> 0.3 (compared 0.6 / 0.3 / 0 side by side at the user's distance: 0.3 visibly less smeared; 0 crispest but opens the armpit).
+  It is one number: rig-spine.mjs SEAM_MAX.

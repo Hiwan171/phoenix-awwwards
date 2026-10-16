@@ -155,7 +155,7 @@ if (+(process.env.SEAM_R ?? 0.18) > 0) {
   const massOf = (v, pred) => { let m = 0; for (let k = 0; k < 4; k++) if (pred(nJ[v*4+k])) m += nW[v*4+k]; return m; };
   const cell = SEAM_R, grid = new Map(), key = (x, y, z) => `${x},${y},${z}`;
   for (let v = 0; v < nV; v++) if (massOf(v, (j) => bodyJ.has(j)) >= 0.7) { const k = key(Math.floor(pos[v*3]/cell), Math.floor(pos[v*3+1]/cell), Math.floor(pos[v*3+2]/cell)); (grid.get(k) ?? grid.set(k, []).get(k)).push(v); }
-  const SEAM_MAX = +(process.env.SEAM_MAX ?? 0.6);                  // the largest share of the body a wing vertex takes (1 = glued)
+  const SEAM_MAX = +(process.env.SEAM_MAX ?? 0.3);                  // the largest share of the body a wing vertex takes (1 = glued)
   const SHOULDER_R0 = +(process.env.SHOULDER_R0 ?? 0.2), SHOULDER_R1 = +(process.env.SHOULDER_R1 ?? 0.45);
   const shoulders = ['Bone_036', 'Bone_039'].map((nm) => byName.get(nm).getWorldTranslation());
   const snapJ = new Uint16Array(nJ), snapW = new Float32Array(nW);         // read the body weights BEFORE any change
