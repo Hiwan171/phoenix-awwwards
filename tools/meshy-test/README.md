@@ -215,3 +215,11 @@ Pipeline now: `rig-feathers` -> `clean-weights` -> `blend-wing` (ALPHA 0.25) -> 
   gap > 10 cm, up to 43 cm). `rig-spine.mjs` now gives the spine a share of every tail vertex that lies forward of the pelvis, fading in
   from x = -0.72 to -0.95 (`TAIL_X0` / `TAIL_X1`): pairs with a gap > 10 cm 137 -> 0, max 7 cm.
 - Lesson: look at the p90 / the worst clusters, not just the median: the median was 1.2 cm while 10 % of the pairs were 37 cm apart.
+
+### The tail stood up / hung down on pitch changes (16/10/2026, recording `2026-10-16 14-17-04`, orbit at full size)
+Seen in the recording (dive and pull-out, u 0.40-0.58): the tail rose vertically behind the body, then hung like a mop. Measured
+(`lab-tailangle`: root->tip direction of the 6 longest tail strips in the bird's frame vs level flight): up to 95 degrees off (u 0.43),
+-37 degrees in the dive, +36 in the pull-up. Cause: the trailing terms (pitchRate, yawRate, load) were added at EVERY joint of a chain
+and accumulate along 9-joint strips (and the flutter too). Now each trailing term is bounded in TOTAL (about 10 degrees) and spread over
+the chain (1 / K per joint), the flutter of long strips is scaled to the same total as a short one, the original tail bones likewise.
+Result: worst 95 -> 24 degrees; pull-up +36 -> +7. Legs' load term bounded too.

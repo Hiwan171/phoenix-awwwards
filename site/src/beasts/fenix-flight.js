@@ -82,6 +82,7 @@ function gazeAt(t, out) {
 }
 /** the wing stroke shrinks smoothly when the scroll makes the beat faster than a bird could (> ~2 Hz): 1 up to 1.6 Hz, ~0.35 at 6 Hz */
 const RATE_DAMP = (hz) => { const x = Math.max(0, hz - 1.6) / 1.2; return 1 / (1 + 0.55 * x * x); };
+const clampT = (x, m) => (x < -m ? -m : x > m ? m : x);
 const num = (name) => +name.replace(/\D/g, '');
 // segment angles (degrees above the horizontal, forward) of the flight posture, chest to head; the stretch flattens the neck
 export const HEAD_TARGET = { v: 121 };      // calibrated by measuring the BEAK tip: the tip sits ~26 degrees below the head bone's axis, so ~104 puts the beak ~10 degrees below the horizon
@@ -258,18 +259,23 @@ export function createFenixFlight(model, opts = {}) {
         }
         // tail / back feather: lateral wave + vertical beat wake + trailing behind the turn; the tail spreads by its lateral index
         const spread = f.region === 'tail' ? (P.tail - 0.5) * 0.5 * (f.lat ?? 0) * (j === 0 ? 1 : 0.35) : 0;
-        const turn = f.region === 'tail' ? -P.yawRate * 0.35 * g : 0, pit = f.region === 'tail' ? P.pitchRate * 0.35 * g : 0;
+        // the tail trails behind turns and pitch changes. The TOTAL bend of the chain is bounded (~10 degrees) and spread over its joints:
+        // it used to be added at every joint and accumulated to 95 degrees along a 9-joint strip (measured), the tail stood up / hung down
+        const spreadK = 1 / Math.max(1, f.K);
+        const turn = f.region === 'tail' ? clampT(-P.yawRate * 0.30, 0.20) * spreadK * 2 * g : 0;
+        const pit = f.region === 'tail' ? clampT(P.pitchRate * 0.30 + P.load * 0.08, 0.18) * spreadK * 2 * g : 0;
         const comb = f.region === 'crest' ? -P.fly * (j === 0 ? 0.55 : 0.18) : f.region === 'back' ? -P.fly * (j === 0 ? 0.35 : 0.1) : 0;         // the wind combs head and mane strands back
-        ry(A, f.A * g * flutter + turn + spread);
-        rz(B, f.A * g * 0.8 * Math.sin(TAU * (ph - f.lagBeat) - 0.4 * j) * fl + pit + comb);
+        const chainK = f.region === 'tail' ? Math.min(1, 4 / f.K) : 1;          // long strips: the same TOTAL wave as a short one
+        ry(A, f.A * g * flutter * chainK + turn + spread);
+        rz(B, f.A * g * 0.8 * Math.sin(TAU * (ph - f.lagBeat) - 0.4 * j) * fl * chainK + pit + comb);
         qmul(C, A, B);
         if (f.region === 'back') return qmul(out, spineAt(r.bi, r, E), C);        // a back feather lies ON the back: each joint follows the spine where it sits
         return qmul(out, base, C);
       }
       case 'tail': {
         const idx = r.j;
-        ry(A, 0.045 * Math.sin(TAU * (2 * t / 2.5 - 0.5 - 0.09 * idx - 0.12 * r.c)) - P.yawRate * 0.18 * (idx + 1) / r.len);
-        rz(B, 0.03 * Math.sin(TAU * (2 * t / 2.5 - 0.35 - 0.1 * idx)) + P.pitchRate * 0.2 * (idx + 1) / r.len + P.load * 0.16 * (idx + 1) / r.len);
+        ry(A, 0.045 * Math.sin(TAU * (2 * t / 2.5 - 0.5 - 0.09 * idx - 0.12 * r.c)) / r.len * 2 + clampT(-P.yawRate * 0.18, 0.12) / r.len);
+        rz(B, 0.03 * Math.sin(TAU * (2 * t / 2.5 - 0.35 - 0.1 * idx)) / r.len * 2 + clampT(P.pitchRate * 0.2 + P.load * 0.1, 0.12) / r.len);
         qmul(C, A, B); return qmul(out, base, C);
       }
       case 'pelvis': {
@@ -288,7 +294,7 @@ export function createFenixFlight(model, opts = {}) {
         const calm = 1 - Math.abs(L) * 0.5;
         const wv = (0.10 + 0.05 * j) * Math.sin(TAU * (P.phase - 0.13 * (j + 1) - (r.li ? 0.08 : 0))) * P.flap * (0.4 + 0.6 * f);
         const sway = (0.07 * Math.sin(TAU * (0.4 * t - 0.15 * j + (r.li ? 0.1 : 0))) + 0.04 * Math.sin(TAU * (0.9 * t - 0.2 * j))) * calm - 0.18 * P.pitchRate * (j + 1) / 5;
-        rz(A, a + sway + wv + P.load * 0.22 * (j + 1) / 5);
+        rz(A, a + sway + wv + clampT(P.load * 0.25, 0.2) / 5);
         ry(B, (0.05 + 0.03 * j) * Math.sin(TAU * (0.55 * t - 0.17 * j + (r.li ? 0.3 : 0))) * calm + (r.side) * (0.05 + 0.04 * j) * f * L - P.yawRate * 0.10 * (j + 1) / 5 * (r.side));
         rx(C, (r.side) * (0.02 + 0.015 * j) * Math.sin(TAU * (0.7 * t - 0.2 * j)));
         qmul(D, A, B); qmul(E, D, C); return qmul(out, base, E);
