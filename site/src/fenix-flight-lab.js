@@ -88,12 +88,38 @@ function applyManual() {
   flight.pose({ ...manual, t: performance.now() / 1000 });
 }
 
+// ── cameras: all of them follow the bird; "free" lets you drag to turn around her while she flies (the wheel keeps scrolling the
+// flight), "orbit" circles her by itself (a function of the progress, so scrolling back un-turns it), the rest are fixed views ──
+const camCfg = { dist: 3.6, turns: 2.0 };
+const V = { up: new THREE.Vector3(0, 1, 0), right: new THREE.Vector3(), tmp: new THREE.Vector3(), last: new THREE.Vector3(), freeInit: false };
+controls.enableZoom = false; controls.enablePan = false;               // the wheel scrolls the flight; distance is the slider
 function placeCamera(b) {
-  if (mode === 'manual' || camMode === 'free') { controls.enabled = true; controls.target.copy(bird.position); return; }
-  controls.enabled = false;
-  if (camMode === 'chase') chaseCamera(demo.path, u, { back: 2.4, up: 1.0, side: 2.6 }, cam);
-  else if (camMode === 'side') { const r = new THREE.Vector3().crossVectors(b.fwd, new THREE.Vector3(0, 1, 0)).normalize(); cam.pos.copy(b.pos).addScaledVector(r, 4.6).add(new THREE.Vector3(0, 0.5, 0)); cam.target.copy(b.pos); }
-  else { cam.pos.set(9, 9, 12); cam.target.copy(b.pos); }
+  camera.up.copy(V.up);
+  if (mode === 'manual') { controls.enabled = true; controls.target.copy(bird.position); return; }
+  const R = camCfg.dist, k = R / 3.6;
+  V.right.crossVectors(b.fwd, V.up).normalize();
+  if (camMode === 'free') {
+    controls.enabled = true;
+    if (!V.freeInit) { V.freeInit = true; camera.position.copy(b.pos).addScaledVector(V.right, R * 0.8).addScaledVector(b.fwd, -R * 0.5).addScaledVector(V.up, R * 0.3); V.last.copy(b.pos); }
+    camera.position.add(V.tmp.copy(b.pos).sub(V.last));                 // follow the bird...
+    V.last.copy(b.pos); controls.target.copy(b.pos); controls.update(); // ...and keep whatever angle the user dragged to
+    V.tmp.copy(camera.position).sub(b.pos).setLength(R); camera.position.copy(b.pos).add(V.tmp);   // distance from the slider
+    return;
+  }
+  V.freeInit = false; controls.enabled = false;
+  if (camMode === 'chase') chaseCamera(demo.path, u, { back: 2.4 * k, up: 1.0 * k, side: 2.6 * k }, cam);
+  else {
+    cam.target.copy(b.pos);
+    if (camMode === 'side') cam.pos.copy(b.pos).addScaledVector(V.right, R).addScaledVector(V.up, R * 0.12);
+    else if (camMode === 'front') cam.pos.copy(b.pos).addScaledVector(b.fwd, R).addScaledVector(V.up, R * 0.15);
+    else if (camMode === 'back') cam.pos.copy(b.pos).addScaledVector(b.fwd, -R).addScaledVector(V.up, R * 0.2);
+    else if (camMode === 'top') { cam.pos.copy(b.pos).addScaledVector(V.up, R); camera.up.copy(b.fwd); }
+    else if (camMode === 'below') { cam.pos.copy(b.pos).addScaledVector(V.up, -R * 0.8).addScaledVector(b.fwd, -R * 0.3); camera.up.copy(b.fwd); }
+    else if (camMode === 'orbit') {                                        // around her, in HER frame: all sides over the flight
+      const az = u * camCfg.turns * Math.PI * 2, el = 0.22 + 0.28 * Math.sin(u * Math.PI * 2 * camCfg.turns * 0.5);
+      cam.pos.copy(b.pos).addScaledVector(V.right, Math.sin(az) * Math.cos(el) * R).addScaledVector(b.fwd, Math.cos(az) * Math.cos(el) * R).addScaledVector(V.up, Math.sin(el) * R);
+    } else { cam.pos.copy(b.pos).add(V.tmp.set(9, 9, 12).multiplyScalar(k)); }                  // wide
+  }
   camera.position.copy(cam.pos); camera.lookAt(cam.target);
 }
 
@@ -104,7 +130,13 @@ const setMode = (m) => {
   if (m === 'manual') { camera.position.set(2.6, 0.9, 3.4); controls.target.set(0, 0, 0); controls.enabled = true; }
 };
 $('m-scroll').onclick = () => setMode('scroll'); $('m-manual').onclick = () => setMode('manual');
-$('cam').onchange = (e) => { camMode = e.target.value; };
+$('cam').onchange = (e) => { camMode = e.target.value; V.freeInit = false; };
+const bindR = (id, fn) => { const el = $(id), o = $('o-' + id); const f = () => { o.textContent = (+el.value).toFixed(1); fn(+el.value); }; el.oninput = f; f(); };
+bindR('dist', (v) => { camCfg.dist = v; }); bindR('turns', (v) => { camCfg.turns = v; });
+let playSeconds = 60; $('dur').onchange = (e) => { playSeconds = +e.target.value; };
+const toggleUI = () => { for (const id of ['panel', 'hud', 'hint']) { const el = $(id); el.style.display = el.style.display === 'none' ? '' : 'none'; } };
+$('hideui').onclick = toggleUI;
+if (Q.get('ui') === '0') toggleUI();
 $('play').onclick = () => { autoplay = !autoplay; $('play').classList.toggle('on', autoplay); };
 $('u').oninput = (e) => { u = +e.target.value; autoplay = false; $('play').classList.remove('on'); scrollTo(0, u * (document.documentElement.scrollHeight - innerHeight)); lenis.scrollTo(u * lenis.limit, { immediate: true }); };
 document.querySelectorAll('input[data-p]').forEach((el) => {
@@ -115,7 +147,12 @@ document.querySelectorAll('input[data-f]').forEach((el) => {
   const out = el.parentElement.querySelector('output'), fmt = () => { out.textContent = (+el.value).toFixed(2); };
   el.oninput = () => { flight.fold[el.dataset.f] = +el.value; fmt(); }; fmt();
 });
-addEventListener('keydown', (e) => { if (e.code === 'Space') { e.preventDefault(); $('play').click(); } });
+addEventListener('keydown', (e) => {
+  if (e.code === 'Space') { e.preventDefault(); $('play').click(); }
+  if (e.code === 'KeyH') toggleUI();
+  const cams = ['chase', 'side', 'front', 'back', 'top', 'below', 'orbit', 'free', 'wide'];
+  if (/^Digit[1-9]$/.test(e.code)) { camMode = cams[+e.code.slice(5) - 1]; $('cam').value = camMode; V.freeInit = false; }
+});
 
 function hud(P, b) {
   $('hud').textContent = `u ${u.toFixed(3)}  pos ${b.pos.x.toFixed(1)}, ${b.pos.y.toFixed(1)}, ${b.pos.z.toFixed(1)}
@@ -130,7 +167,7 @@ function frame(now) {
   lenis.raf(now);
   if (hold) { renderer.render(scene, camera); requestAnimationFrame(frame); return; }
   if (mode === 'scroll') {
-    if (autoplay) { u = Math.min(1, u + dt / 60); if (u >= 1) autoplay = false; lenis.scrollTo(u * lenis.limit, { immediate: true }); }
+    if (autoplay) { u = Math.min(1, u + dt / playSeconds); if (u >= 1) autoplay = false; lenis.scrollTo(u * lenis.limit, { immediate: true }); }
     else u = Math.min(1, Math.max(0, lenis.limit ? lenis.scroll / lenis.limit : 0));
     $('u').value = u; $('o-u').textContent = u.toFixed(3);
     const { P, b } = applyU(u); placeCamera(b); hud(P, b);
@@ -148,7 +185,8 @@ window.__lab = {
   THREE, scene, camera, bird, flight, demo, skinned, manual,
   setU(uu) { hold = true; mode = 'scroll'; autoplay = false; u = uu; const r = applyU(uu); placeCamera(r.b); hud(r.P, r.b); renderer.render(scene, camera); return r; },
   setManual(p, cam) { hold = true; setMode('manual'); Object.assign(manual, p); applyManual(); if (cam) { camera.position.set(...cam.pos); controls.target.set(...(cam.target ?? [0, 0, 0])); camera.lookAt(controls.target); controls.enabled = false; } renderer.render(scene, camera); },
-  setCamMode(m) { camMode = m; },
+  setCamMode(m) { camMode = m; V.freeInit = false; },
+  setDist(d) { camCfg.dist = d; },
   render() { renderer.render(scene, camera); },
   ready: true,
 };

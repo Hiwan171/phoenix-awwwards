@@ -32,9 +32,13 @@
     <button id="m-scroll" class="on">scroll flight</button><button id="m-manual">manual pose</button>
   </div>
   <div>
-    camera <select id="cam"><option value="chase">chase</option><option value="wide">wide</option><option value="side">side</option><option value="free">free (drag)</option></select>
+    camera <select id="cam"><option value="chase">1 chase</option><option value="side">2 side</option><option value="front">3 front</option><option value="back">4 back</option><option value="top">5 top</option><option value="below">6 below</option><option value="orbit">7 orbit (auto)</option><option value="free">8 free (drag)</option><option value="wide">9 wide</option></select>
     <button id="play">auto-play</button>
+    <select id="dur"><option value="30">30 s</option><option value="60" selected>60 s</option><option value="90">90 s</option><option value="120">120 s</option></select>
+    <button id="hideui">hide UI (H)</button>
   </div>
+  <label><span>camera distance</span><output id="o-dist"></output><input id="dist" type="range" min="1.5" max="14" step="0.1" value="3.6"></label>
+  <label><span>orbit: turns per flight</span><output id="o-turns"></output><input id="turns" type="range" min="0.5" max="6" step="0.5" value="2"></label>
   <label><span>progress u</span><output id="o-u"></output><input id="u" type="range" min="0" max="1" step="0.0005" value="0"></label>
   <div id="manual" hidden>
     <h2>pose</h2>
@@ -61,7 +65,7 @@
   </div>
 </div>
 <div id="hud"></div>
-<div id="hint">scroll to fly · scroll back to rewind</div>
+<div id="hint">scroll to fly · scroll back to rewind · keys 1-9 cameras · drag to turn (free) · H hides the UI · Space plays</div>
 <script type="module" src="/src/fenix-flight-lab.js"></script>
 </body>
 </html>
