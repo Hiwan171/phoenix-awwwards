@@ -119,6 +119,7 @@ export function createFenixFlight(model, opts = {}) {
   CREST.forEach((k, j) => set(k, { kind: 'crest', j }));
   BACK.forEach(([a, b, c, sh], bi) => [a, b, c].forEach((k, j) => set(k, { kind: 'back', j, shoulder: sh, bi, shRole: null })));
   set(0, { kind: 'root' });
+  set(1, { kind: 'pelvis' });                              // Bone_001 carries the belly, the legs and the tail base: it must move too
   // the spine chain (rig-spine.mjs): pelvis -> chest -> neck -> head, K joints. Bone_008/007/033/032 are dead (no weights).
   const spine = [];
   for (let j = 0; byName.has('Spine_' + String(j).padStart(2, '0')); j++) spine.push(byName.get('Spine_' + String(j).padStart(2, '0')));
@@ -217,13 +218,30 @@ export function createFenixFlight(model, opts = {}) {
         rz(B, 0.03 * Math.sin(TAU * (2 * t / 2.5 - 0.35 - 0.1 * idx)) + P.pitchRate * 0.2 * (idx + 1) / r.len);
         qmul(C, A, B); return qmul(out, base, C);
       }
+      case 'pelvis': {
+        // the lower body: it rides the wing beat (rises and tilts with the stroke, a touch after the chest), leans into the turn,
+        // pitches toward the flight posture, and breathes. Everything below it (belly, legs, tail base) goes with it.
+        const f = P.fly, fl = P.flap, st = P.stretch;
+        const th = -(restTheta[0] - FLIGHT_THETA[0]) * f * 0.5 + (3.4 + 1.6 * st) * Math.sin(TAU * (P.phase + 0.10)) * fl * f + 1.0 * Math.sin(TAU * (t / 4.2) + 0.5);
+        rz(A, (th * Math.PI) / 180);
+        ry(B, 0.05 * Math.sin(TAU * (P.phase + 0.35)) * fl * f - P.yawRate * 0.12);
+        rx(C, -P.bank * 0.22 + 0.02 * Math.sin(TAU * (t / 5.3)));
+        qmul(D, A, B); qmul(E, D, C); return qset(out, E[0], E[1], E[2], E[3]);
+      }
       case 'leg': {
-        const L = P.legs, j = r.j;
+        const L = P.legs, j = r.j, f = P.fly;
         // + about z swings a paw backwards (the bird faces -x). tucked: thigh back, shin folded under; landing: reaching forward
         const back = [0.35, 0.8, 1.15, 0.95, 0.55][j], fwd = [0.25, 0.45, 0.15, -0.15, -0.3][j];
         const a = L >= 0 ? L * back * fold.tuckLegs : L * fwd * 1.0;
-        const sway = 0.07 * Math.sin(TAU * (0.4 * t - 0.15 * j + (r.li ? 0.1 : 0))) * (1 - Math.abs(L) * 0.6) - 0.05 * P.pitchRate * (j + 1) / 5;
-        rz(A, a + sway); return qmul(out, base, A);
+        // life: the legs are never held. Each joint trails the wing beat a little more than the one above (a wave down the leg),
+        // dangles in the airflow (pitch), splays and swings with the turn, and flexes slowly on its own
+        const calm = 1 - Math.abs(L) * 0.5;
+        const wv = (0.10 + 0.05 * j) * Math.sin(TAU * (P.phase - 0.13 * (j + 1) - (r.li ? 0.08 : 0))) * P.flap * (0.4 + 0.6 * f);
+        const sway = (0.07 * Math.sin(TAU * (0.4 * t - 0.15 * j + (r.li ? 0.1 : 0))) + 0.04 * Math.sin(TAU * (0.9 * t - 0.2 * j))) * calm - 0.18 * P.pitchRate * (j + 1) / 5;
+        rz(A, a + sway + wv);
+        ry(B, (0.05 + 0.03 * j) * Math.sin(TAU * (0.55 * t - 0.17 * j + (r.li ? 0.3 : 0))) * calm + (r.side) * (0.05 + 0.04 * j) * f * L - P.yawRate * 0.10 * (j + 1) / 5 * (r.side));
+        rx(C, (r.side) * (0.02 + 0.015 * j) * Math.sin(TAU * (0.7 * t - 0.2 * j)));
+        qmul(D, A, B); qmul(E, D, C); return qmul(out, base, E);
       }
       case 'crest': {
         rz(A, 0.12 * Math.sin(TAU * (2 * t / 2.5 - 0.18 * r.j)) - 0.15 * P.pitchRate * (r.j + 1) - P.fly * (r.j === 0 ? 0.75 : 0.25));      // in flight the wind combs the crest back

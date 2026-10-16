@@ -122,3 +122,13 @@ The controller (`site/src/beasts/fenix-flight.js`) poses every spine segment to 
 flight (`P.fly`, `P.stretch`): body horizontal, neck reaching forward, head level, legs tucked back, tail and crest combed back, plus
 a wave that travels along the body with the wing beat. Measured (12 poses): body/neck 8-16 stretched edges, whole rig 0.23-0.28 %
 in flight posture, 0.42 % in the swept dive; no pops along the path; 60 fps; ~1.5 ms per pose (1096 bones).
+
+### Correction (16/10/2026, from the user's recording): head detached, lower body stiff
+- The "crest" region of `rig-feathers.mjs` swallowed the HEAD and the neck shell: Meshy also rides them on bones 40-42, so after
+  the first spine build the head had 88 % of its weight on feather chains (loose from the body) and the neck 58 %. Now the crest
+  region only takes THIN, LONG strands (`ELONG` >= 2.5 bbox ratio, >= 0.16 long): 5 feathers instead of 96; head = 98 % spine,
+  neck = 92 % spine. (Check: `lab-who`-style report of the weight mass by group around Spine_10 / Spine_08 / Spine_00.)
+- The belly was 49 % on Bone_000/001 and the legs: nothing moved them. `Bone_001` now has a `pelvis` rule in fenix-flight.js
+  (rides the beat a touch after the chest, leans into the turn, pitches toward the flight posture, breathes; belly, legs and tail
+  base go with it) and the legs got a wave down the chain, airflow drag, splay with the turn and a slow flex of their own.
+- Lesson: never trust "dominant bone" names; measure the weight mass of each body zone by group before re-skinning.

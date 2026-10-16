@@ -58,6 +58,12 @@ for (let w = 0; w < nW; w++) {
 const agg = Array.from({ length: comps.count }, () => ({ n: 0, reg: new Float32Array(nR) }));
 for (let w = 0; w < nW; w++) { const c = agg[comps.comp[w]]; c.n++; for (let r = 0; r < nR; r++) c.reg[r] += regW[w*nR + r] > 0.5 ? 1 : 0; }
 const compRegion = agg.map((c) => { let br = -1, bv = 0; for (let r = 0; r < nR; r++) if (c.reg[r] > bv) { bv = c.reg[r]; br = r; } return br >= 0 && bv / c.n >= CFG.tailFrac ? br : -1; });
+// the crest region is only for THIN, LONG strands (hair, whiskers): the head, the neck shell and other compact parts also ride on
+// bones 40-42 in Meshy's skin, and turning them into feathers detached the head from the body (found from a screen recording)
+const cbox = Array.from({ length: comps.count }, () => ({ min: [9, 9, 9], max: [-9, -9, -9] }));
+for (let w = 0; w < nW; w++) { const b = cbox[comps.comp[w]]; for (let k = 0; k < 3; k++) { const x = p[w*3+k]; if (x < b.min[k]) b.min[k] = x; if (x > b.max[k]) b.max[k] = x; } }
+const isStrand = (c) => { const d = cbox[c].max.map((x, k) => x - cbox[c].min[k]).sort((a, b) => b - a); return d[0] >= 0.16 && d[0] / Math.max(d[1], 1e-3) >= +(process.env.ELONG ?? 2.5); };
+for (let c = 0; c < comps.count; c++) if (compRegion[c] === regionNames.indexOf('crest') && !isStrand(c)) compRegion[c] = -1;
 const strips = [], pieces = [];
 agg.forEach((c, i) => { if (compRegion[i] < 0) return; (c.n >= (REGIONS[regionNames[compRegion[i]]].minStrip ?? CFG.minStrip) ? strips : pieces).push(i); });
 for (let r = 0; r < nR; r++) {
@@ -65,6 +71,18 @@ for (let r = 0; r < nR; r++) {
   console.log(`${regionNames[r].padEnd(6)} feathers ${String(S.length).padStart(3)} (${S.reduce((a, c) => a + agg[c].n, 0)} verts)  loose pieces ${String(P.length).padStart(5)} (${P.reduce((a, c) => a + agg[c].n, 0)} verts)  sizes ${S.map((c) => agg[c].n).sort((a, b) => b - a).slice(0, 14).join(' ')}`);
 }
 console.log(`verts ${nW}, components ${comps.count}`);
+if (process.env.DUMP_CREST) {
+  const rows = [];
+  const ci = regionNames.indexOf('crest');
+  const bb = new Map();
+  for (let w = 0; w < nW; w++) { const c = comps.comp[w]; if (compRegion[c] !== ci) continue; let b = bb.get(c); if (!b) bb.set(c, b = { n: 0, min: [9, 9, 9], max: [-9, -9, -9], cy: 0, cx: 0 }); b.n++; b.cy += p[w*3+1]; b.cx += p[w*3]; for (let k = 0; k < 3; k++) { b.min[k] = Math.min(b.min[k], p[w*3+k]); b.max[k] = Math.max(b.max[k], p[w*3+k]); } }
+  for (const [c, b] of bb) rows.push({ n: b.n, cx: b.cx / b.n, cy: b.cy / b.n, size: b.max.map((x, k) => x - b.min[k]) });
+  rows.sort((a, b) => b.n - a.n);
+  const byY = {}; for (const r of rows) { const k = (Math.floor(r.cy / 0.2) * 0.2).toFixed(1); (byY[k] ??= { c: 0, v: 0 }).c++; byY[k].v += r.n; }
+  console.log('crest components by centroid height:', JSON.stringify(byY));
+  console.log('largest 12:'); rows.slice(0, 12).forEach((r) => console.log(`  n${r.n} c(${r.cx.toFixed(2)},${r.cy.toFixed(2)}) size(${r.size.map((x) => x.toFixed(2))})`));
+}
+
 if (process.env.DRY) process.exit(0);
 
 // ── geometry helpers ──
