@@ -110,6 +110,18 @@ sozinho.** Estado: **dragão e fênix prontos**; tigre e tartaruga aguardam. Tud
   `make-fenix-motion.mjs` e web GLB por `to-web.mjs` (`site/public/models/fenix-meshy-{web,lite}.glb`, 3,9 / 1,9 MB).
   No hero: padrão = rig Meshy, `?rig=old` = o anterior; fogo e aura **desligados** por padrão (`?fire=1`, `?aura=1`).
 
+- **Laboratório de voo (16/10/2026): `http://localhost:5173/fenix-flight-lab.html`.** A fênix voa um caminho de demonstração
+  num cenário vazio **comandada pelo scroll** (Lenis; rolar para trás desfaz o voo). Peças:
+  `site/src/beasts/fenix-flight.js` (controlador: parâmetros -> poses dos 694 ossos, função pura, sem estado),
+  `flight-path.js` (caminho Catmull-Rom por comprimento de arco + linha do tempo PCHIP monótona + câmera de perseguição),
+  `flight-demo.js` (11 waypoints e 12 chaves: pairar -> subir -> voo batido -> planar -> mergulho -> arremetida -> aproximação
+  -> flare -> pouso -> asas dobram) e `fenix-flight-lab.js` (a página). Modo "manual pose" tem sliders de todos os parâmetros e
+  dos graus de liberdade da asa dobrada. Parâmetros (`P`): `t, phase, flap, open, sweep, legs, tail, bank, pitch, pitchRate,
+  yawRate, lookYaw, lookPitch`. Fênix = f(progresso): nenhum estado entre quadros.
+  Resultados: asa dobra de verdade (só o ombro desce+varre, `FOLD` em fenix-flight.js; dobra em Z grande empurra a ponta da asa
+  para cima, então ficou leve); arestas esticadas ao longo do voo 0,02-0,23 % (pior na pose dobrada); sem saltos (<= 6,5 graus por
+  passo de 0,0005 em u); 60 fps (web e lite); pose custa ~0,9 ms por quadro. QA: `__lab.setU(u)`, `__lab.setManual(P, cam)`.
+
 ### Performance — o que medimos (Intel UHD 620 / i5-10210U, 1080p; vale para as novas feras)
 - **Resultado:** o hero com a fênix foi de **19,5 → 38,8 fps** (A/B intercalado, vsync ligado) com visual equivalente
   (diff de pixels: corpo PSNR 61–71 dB; chamas estatisticamente iguais), e o governador leva a ~55–60 fps nos tiers altos.

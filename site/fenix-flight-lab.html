@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="google" content="notranslate">
+<title>Phoenix flight lab</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; background: #050404; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; color: #e9dfcf; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  #spacer { height: 900vh; }
+  #panel { position: fixed; top: 10px; left: 10px; width: 268px; max-height: calc(100vh - 20px); overflow: auto; padding: 10px 12px; background: rgba(14, 12, 14, .8); border: 1px solid rgba(255, 220, 170, .18); border-radius: 8px; backdrop-filter: blur(6px); }
+  #panel h1 { margin: 0 0 6px; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: #f2c25a; font-weight: 600; }
+  #panel h2 { margin: 10px 0 2px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #8d8272; font-weight: 600; }
+  #panel label { display: grid; grid-template-columns: 1fr 48px; gap: 0 8px; margin: 3px 0; }
+  #panel label span { color: #bfb3a0; }
+  #panel output { text-align: right; color: #f2e6cf; }
+  #panel input[type=range] { grid-column: 1 / 3; width: 100%; accent-color: #f2a43a; }
+  #panel button, #panel select { background: #1d1a1d; color: #e9dfcf; border: 1px solid rgba(255, 220, 170, .22); border-radius: 5px; padding: 4px 6px; font: inherit; margin: 2px 2px 2px 0; }
+  #panel button.on { background: #3a2a1c; border-color: #8a5a2a; color: #ffd9a8; }
+  #hud { position: fixed; right: 12px; bottom: 10px; text-align: right; color: #8d8272; white-space: pre; }
+  #hint { position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%); color: #8d8272; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="spacer"></div>
+<div id="panel">
+  <h1>Phoenix flight lab</h1>
+  <div>
+    <button id="m-scroll" class="on">scroll flight</button><button id="m-manual">manual pose</button>
+  </div>
+  <div>
+    camera <select id="cam"><option value="chase">chase</option><option value="wide">wide</option><option value="side">side</option><option value="free">free (drag)</option></select>
+    <button id="play">auto-play</button>
+  </div>
+  <label><span>progress u</span><output id="o-u"></output><input id="u" type="range" min="0" max="1" step="0.0005" value="0"></label>
+  <div id="manual" hidden>
+    <h2>pose</h2>
+    <label><span>open (0 folded .. 1)</span><output></output><input data-p="open" type="range" min="0" max="1" step="0.01" value="1"></label>
+    <label><span>flap amplitude</span><output></output><input data-p="flap" type="range" min="0" max="1" step="0.01" value="1"></label>
+    <label><span>beat phase (cycles)</span><output></output><input data-p="phase" type="range" min="0" max="1" step="0.005" value="0"></label>
+    <label><span>sweep back</span><output></output><input data-p="sweep" type="range" min="0" max="1" step="0.01" value="0"></label>
+    <label><span>legs (-1 fwd .. 1 tucked)</span><output></output><input data-p="legs" type="range" min="-1" max="1" step="0.01" value="0"></label>
+    <label><span>tail spread</span><output></output><input data-p="tail" type="range" min="0" max="1" step="0.01" value="0.5"></label>
+    <label><span>bank</span><output></output><input data-p="bank" type="range" min="-0.6" max="0.6" step="0.01" value="0"></label>
+    <label><span>pitch</span><output></output><input data-p="pitch" type="range" min="-0.8" max="0.8" step="0.01" value="0"></label>
+    <label><span>head yaw</span><output></output><input data-p="lookYaw" type="range" min="-1" max="1" step="0.01" value="0"></label>
+    <label><span>head pitch</span><output></output><input data-p="lookPitch" type="range" min="-0.7" max="0.7" step="0.01" value="0"></label>
+    <h2>folded wing (at open = 0)</h2>
+    <label><span>shoulder down</span><output></output><input data-f="down" type="range" min="-0.5" max="2" step="0.01" value="1.15"></label>
+    <label><span>shoulder sweep</span><output></output><input data-f="sweep" type="range" min="-0.5" max="1.6" step="0.01" value="0.85"></label>
+    <label><span>arm</span><output></output><input data-f="arm" type="range" min="-2" max="2" step="0.01" value="0.12"></label>
+    <label><span>forearm</span><output></output><input data-f="forearm" type="range" min="-2.5" max="2.5" step="0.01" value="-0.2"></label>
+    <label><span>hand</span><output></output><input data-f="hand" type="range" min="-2" max="2" step="0.01" value="0.15"></label>
+    <label><span>feather fan</span><output></output><input data-f="fan" type="range" min="-1.5" max="1.5" step="0.01" value="0.25"></label>
+    <label><span>fan bias</span><output></output><input data-f="fanBias" type="range" min="-0.6" max="0.6" step="0.01" value="0"></label>
+  </div>
+</div>
+<div id="hud"></div>
+<div id="hint">scroll to fly · scroll back to rewind</div>
+<script type="module" src="/src/fenix-flight-lab.js"></script>
+</body>
+</html>
