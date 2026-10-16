@@ -176,3 +176,12 @@ in flight posture, 0.42 % in the swept dive; no pops along the path; 60 fps; ~1.
   axis balance, because the sculpt's wing PLANES are rolled differently. `fold.rollA` / `rollB` (0.25 / 0.42 rad) roll each wing about
   its own axis after the balance: symmetric dihedral in glide, on the up and down strokes and in the dive (checked front and top).
 - Dive: open 0.68 / sweep 0.62 (was 0.55 / 0.85, which crumpled the feathers in the pull-out).
+
+### Cleaning Meshy's mixed weights per piece (16/10/2026): `clean-weights.mjs`
+Pipeline now: `rig-feathers.mjs` -> `clean-weights.mjs` -> `rig-spine.mjs <clean> Fenix_rig2.glb` -> `to-web.mjs`.
+Measured which vertices stretch (union of 5 flight poses; `lab-stretchbones`): pieces skinned to TWO groups of bones that move
+differently (back + tail root 119, back + legs, back + wing forearm, thigh pieces...). Each piece (connected component, <= 8000 verts) now
+keeps ONLY its dominant group's weights (>= 30 % of the piece, another group >= 8 %), renormalised; the blending inside the group is
+untouched. 650 pieces / 29.8k vertices of 450k. Result (web GLB): stretched edges per pose 624-726 -> 173-206 (0.26-0.30 % -> 0.07-0.09 %),
+worst 35-55x -> 17-31x; the union over the 5 poses 1098 -> 371. No cracks seen in the renders (pieces are separate components).
+What is left (~370): pieces that straddle the spine and the back bones (Spine_07 + Bone_048), tail root x back feathers, thigh x back.
