@@ -42,6 +42,7 @@ export const FOLD = {
   fanBias: 0.0,
   tuckLegs: 1,
   rollA: 0.25, rollB: 0.42,  // radians: roll of each wing about its own axis (the sculpt's two wings are not mirror images; found in the lab)
+  correctAt: 1,         // where the wing's symmetry correction (balance + roll) is applied: 0 = shoulder (it pulled the wing root 10 cm off the body), 1 = arm
   backK: 0.7,
 };
 
@@ -140,7 +141,7 @@ export function createFenixFlight(model, opts = {}) {
     }
   }
   wings.forEach((w, wi) => {
-    w.chain.forEach((k, j) => set(k, { kind: 'wing', wing: w, j }));
+    w.chain.forEach((k, j) => set(k, { kind: 'wing', wing: w, j, bi: idxOf(k) }));
     // the second branch of the forearm carries outer feathers like the hand does
     set(wi === 0 ? 53 : 58, { kind: 'wing', wing: w, j: 4 });
   });
@@ -229,9 +230,10 @@ export function createFenixFlight(model, opts = {}) {
         if (j === 0) {                                                // shoulder: balance, sweep back, lower (closing), beat
           ry(A, s * (0.14 * fb + P.sweep * 0.55 * (1 - cl) + fold.sweep * cl));
           rx(B, -s * (raise - bankDiff * (1 - cl)) + s * fold.down * cl);
-          const rollA = (w.side === wings[1].side ? fold.rollB : fold.rollA) * (1 - 0.0 * cl);
-          qaxis(D, w.axis[0], w.axis[1], w.axis[2], rollA); qmul(E, D, w.bal);          // the wing's own roll, after the balance
-          qmul(C, A, E); return qmul(out, B, C);
+          // ABSOLUTE on purpose: the sculpt's wing is already spread for flight; the chest turns ~80 degrees into the flight posture and the wing
+          // must not (it would stand up). The junction is skin that stretches: the wing-body seam in rig-spine.mjs.
+          if (fold.correctAt === 0) { wingCorr(w, E); qmul(C, A, E); return qmul(out, B, C); }
+          return qmul(out, B, A);
         }
         // arm, forearm, hand, second branch: each adds its share of the beat, the sweep and (closing) the Z-fold
         const share = [[0, 0], [0.10, 0.18], [0.16, 0.30], [0.18, 0.32], [0.18, 0.32]][j];
@@ -239,7 +241,9 @@ export function createFenixFlight(model, opts = {}) {
         const wave = Math.sin(TAU * (ph - 0.04 * j)) * 0.04 * fl * (1 - cl);
         const ld = P.load * (0.5 + 0.5 * (1 - cl));                    // the wing carries the load: the tips bend up in a pull-up, float in a push-over
         rx(A, -s * share[0] * raise + wave - s * ld * [0, 0.10, 0.18, 0.26, 0.26][j]); ry(B, s * (share[1] * fb + zf * cl + 0.12 * P.sweep * (1 - cl)));
-        qmul(C, A, B); return qmul(out, base, C);
+        qmul(C, A, B);
+        if (j === 1 && fold.correctAt === 1) { wingCorr(w, E); qmul(D, E, C); return qmul(out, base, D); }     // the symmetry correction pivots at the ARM: the root stays on the body
+        return qmul(out, base, C);
       }
       case 'feather': {
         const f = r.f, j = r.j, g = 0.35 + 0.65 * (j / Math.max(1, f.K - 1)), lag = 0.5 * j;
@@ -349,6 +353,8 @@ export function createFenixFlight(model, opts = {}) {
     for (let c = 0; c < 4; c++) out[c] = spD[a + c] * (1 - t) + sg * spD[b + c] * t;
     return qnorm(out);
   }
+  /** the wing's symmetry correction (balance toward the mean pose, then its own roll) into o */
+  function wingCorr(w, o) { const roll = w.side === wings[1].side ? fold.rollB : fold.rollA; qaxis(tmp3, w.axis[0], w.axis[1], w.axis[2], roll); return qmul(o, tmp3, w.bal); }
   const baseTmp = new Float64Array(4), outQ = new Float64Array(4), pqA = new Float64Array(4), rwA = new Float64Array(4), rlA = new Float64Array(4);
   const ld = (o, arr, i) => { o[0] = arr[i * 4]; o[1] = arr[i * 4 + 1]; o[2] = arr[i * 4 + 2]; o[3] = arr[i * 4 + 3]; return o; };
   function pose(P) {

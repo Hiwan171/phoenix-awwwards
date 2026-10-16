@@ -49,6 +49,11 @@ const tailJoint = names.map((nm) => /^F_tail_/.test(nm) || /^Bone_0(1[4-9]|2[0-9
 const TAIL_X0 = +(process.env.TAIL_X0 ?? -0.72), TAIL_X1 = +(process.env.TAIL_X1 ?? -0.95);
 const alphaTail = new Float32Array(nV);
 for (let v = 0; v < nV; v++) { let m = 0; for (let k = 0; k < 4; k++) if (tailJoint[J[v*4+k]]) m += Wt[v*4+k]; if (m < 0.7) continue; const x = pos[v*3]; const t = Math.min(1, Math.max(0, (x - TAIL_X0) / (TAIL_X1 - TAIL_X0))); alphaTail[v] = t * t * (3 - 2 * t); }
+// WING root ("armpit"): the wing pieces that sit next to the body follow the spine where they are, fading out along the wing.
+// Measured: every contact pair wing x body opened 25-30 cm in flight, the wing turned as a block and came off the body.
+const wingJoint = names.map((nm) => /^F_wing[AB]_/.test(nm) || /^Bone_0(3[4-9]|49|5[0-9]|6[0-9])$/.test(nm));
+const WING_D0 = +(process.env.WING_D0 ?? 0.06), WING_D1 = +(process.env.WING_D1 ?? 0.30), WING_MAX = +(process.env.WING_MAX ?? 0);
+const alphaWing = new Float32Array(nV);                          // filled once the centre line is known
 const alpha = new Float32Array(nV);
 for (let v = 0; v < nV; v++) { let a = 0; for (let k = 0; k < 4; k++) if (oldSet.has(J[v*4+k])) a += Wt[v*4+k]; alpha[v] = a; }
 let nRegion = 0; for (let v = 0; v < nV; v++) if (alpha[v] >= 0.35) nRegion++;
@@ -87,6 +92,12 @@ for (let it = 0; it < 3; it++) {
   a2.forEach((a, i) => { if (i > 0 && a.w > 1e-6) centres[i] = [a.x / a.w, a.y / a.w, a.z / a.w]; });
 }
 for (let it = 0; it < 3; it++) { const c2 = centres.map((c) => c.slice()); for (let i = 1; i < K - 1; i++) for (let c = 0; c < 3; c++) c2[i][c] = 0.25 * centres[i-1][c] + 0.5 * centres[i][c] + 0.25 * centres[i+1][c]; for (let i = 0; i < K; i++) centres[i] = c2[i]; }   // a smooth line (the centroids wobble)
+{ // distance of every wing vertex to the spine's centre line -> its share of the spine
+  const distLine = (x, y, z) => { let best = Infinity; for (let i = 0; i < K - 1; i++) { const a = centres[i], b = centres[i+1], dx = b[0]-a[0], dy = b[1]-a[1], dz = b[2]-a[2], l2 = dx*dx+dy*dy+dz*dz || 1e-9; const t = Math.max(0, Math.min(1, ((x-a[0])*dx + (y-a[1])*dy + (z-a[2])*dz) / l2)); best = Math.min(best, Math.hypot(x-a[0]-dx*t, y-a[1]-dy*t, z-a[2]-dz*t)); } return best; };
+  let n = 0;
+  for (let v = 0; v < nV; v++) { let m = 0; for (let k = 0; k < 4; k++) if (wingJoint[J[v*4+k]]) m += Wt[v*4+k]; if (m < 0.5) continue; const d = distLine(pos[v*3], pos[v*3+1], pos[v*3+2]); const t = Math.min(1, Math.max(0, (d - WING_D0) / (WING_D1 - WING_D0))); const a = WING_MAX * (1 - t * t * (3 - 2 * t)) * m; if (a > 0.001) { alphaWing[v] = a; n++; } }
+  console.log(`wing root vertices sharing the spine: ${n} (d ${WING_D0}..${WING_D1}, max ${WING_MAX})`);
+}
 console.log('spine joints:'); centres.forEach((c, i) => console.log('  Spine_' + String(i).padStart(2, '0'), c.map((x) => x.toFixed(2)).join(', ')));
 if (process.env.DRY) process.exit(0);
 
@@ -121,15 +132,50 @@ const nOld = joints.length, buffer = root.listBuffers()[0];
 const nJ = new Uint16Array(nV * 4), nW = new Float32Array(nV * 4);
 let changed = 0;
 for (let v = 0; v < nV; v++) {
-  if (alpha[v] <= 1e-4 && alphaTail[v] <= 1e-4) { for (let k = 0; k < 4; k++) { nJ[v*4+k] = J[v*4+k]; nW[v*4+k] = Wt[v*4+k]; } continue; }
+  if (alpha[v] <= 1e-4 && alphaTail[v] <= 1e-4 && alphaWing[v] <= 1e-4) { for (let k = 0; k < 4; k++) { nJ[v*4+k] = J[v*4+k]; nW[v*4+k] = Wt[v*4+k]; } continue; }
   const entries = new Map();
-  const keep = 1 - alphaTail[v];
+  const extra = Math.min(1, alphaTail[v] + alphaWing[v]), keep = 1 - extra;
   for (let k = 0; k < 4; k++) if (!oldSet.has(J[v*4+k]) && Wt[v*4+k] > 0) entries.set(J[v*4+k], (entries.get(J[v*4+k]) ?? 0) + Wt[v*4+k] * keep);
   const u = project(pos[v*3], pos[v*3+1], pos[v*3+2]) * (K - 1);
-  for (const [j, b] of bs(Math.min(K - 1.0001, u))) entries.set(nOld + j, (entries.get(nOld + j) ?? 0) + (alpha[v] * keep + alphaTail[v]) * b);
+  for (const [j, b] of bs(Math.min(K - 1.0001, u))) entries.set(nOld + j, (entries.get(nOld + j) ?? 0) + (alpha[v] * keep + extra) * b);
   const top = [...entries.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4), sum = top.reduce((s, e) => s + e[1], 0);
   for (let k = 0; k < 4; k++) { nJ[v*4+k] = top[k]?.[0] ?? 0; nW[v*4+k] = top[k] ? top[k][1] / sum : 0; }
   changed++;
+}
+// ── 4b. the SEAM between the wing and the body ("armpit") ── (SEAM_R=0 switches it off)
+// The wing turns about its shoulder as a block (balance, roll, beat): the wing pieces that touch the body came off it by 10 cm standing
+// and 25-40 cm in flight (measured, the BODY does not move: the wing does). Every wing vertex that lies within SEAM_R of the body's
+// surface takes the weights of the nearest body vertex, with a share that falls from 1 (touching) to 0 (SEAM_R away): the root is
+// glued to the body, the rest of the wing is free.
+if (+(process.env.SEAM_R ?? 0.2) > 0) {
+  const SEAM_R = +(process.env.SEAM_R ?? 0.2);                     // the legs are NOT part of the seam (they tuck and would drag the wing)
+  const spineIdx = new Set(Array.from({ length: K }, (_, j) => nOld + j));
+  const bodyJ = new Set([...spineIdx, ...['Bone_000','Bone_001'].map((nm) => names.indexOf(nm)).filter((i) => i >= 0)]);
+  const wingJ = (j) => j < nOld && wingJoint[j];
+  const massOf = (v, pred) => { let m = 0; for (let k = 0; k < 4; k++) if (pred(nJ[v*4+k])) m += nW[v*4+k]; return m; };
+  const cell = SEAM_R, grid = new Map(), key = (x, y, z) => `${x},${y},${z}`;
+  for (let v = 0; v < nV; v++) if (massOf(v, (j) => bodyJ.has(j)) >= 0.7) { const k = key(Math.floor(pos[v*3]/cell), Math.floor(pos[v*3+1]/cell), Math.floor(pos[v*3+2]/cell)); (grid.get(k) ?? grid.set(k, []).get(k)).push(v); }
+  const SHOULDER_R0 = +(process.env.SHOULDER_R0 ?? 9), SHOULDER_R1 = +(process.env.SHOULDER_R1 ?? 10);
+  const shoulders = ['Bone_036', 'Bone_039'].map((nm) => byName.get(nm).getWorldTranslation());
+  const snapJ = new Uint16Array(nJ), snapW = new Float32Array(nW);         // read the body weights BEFORE any change
+  let seamed = 0;
+  for (let v = 0; v < nV; v++) {
+    if (massOf(v, wingJ) < 0.5) continue;
+    const cx = Math.floor(pos[v*3]/cell), cy = Math.floor(pos[v*3+1]/cell), cz = Math.floor(pos[v*3+2]/cell); let best = -1, bd = SEAM_R;
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) { const l = grid.get(key(cx+dx, cy+dy, cz+dz)); if (!l) continue; for (const b of l) { const d = Math.hypot(pos[v*3]-pos[b*3], pos[v*3+1]-pos[b*3+1], pos[v*3+2]-pos[b*3+2]); if (d < bd) { bd = d; best = b; } } }
+    if (best < 0) continue;
+    // only the ROOT of the wing: parts of the wing that merely lie next to the body (the folded tip of a wing near the hip) must stay free
+    const ds = Math.min(...shoulders.map((q) => Math.hypot(pos[v*3]-q[0], pos[v*3+1]-q[1], pos[v*3+2]-q[2])));
+    const rs = Math.min(1, Math.max(0, (ds - SHOULDER_R0) / (SHOULDER_R1 - SHOULDER_R0))), near = 1 - rs * rs * (3 - 2 * rs);
+    if (near <= 0) continue;
+    const t = bd / SEAM_R, f = (1 - t * t * (3 - 2 * t)) * near;
+    const acc = new Map();
+    for (let k = 0; k < 4; k++) { if (nW[v*4+k] > 0) acc.set(nJ[v*4+k], (acc.get(nJ[v*4+k]) ?? 0) + nW[v*4+k] * (1 - f)); if (snapW[best*4+k] > 0) acc.set(snapJ[best*4+k], (acc.get(snapJ[best*4+k]) ?? 0) + snapW[best*4+k] * f); }
+    const top = [...acc.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4), sum = top.reduce((s2, e) => s2 + e[1], 0);
+    for (let k = 0; k < 4; k++) { nJ[v*4+k] = top[k]?.[0] ?? 0; nW[v*4+k] = top[k] ? top[k][1] / sum : 0; }
+    seamed++;
+  }
+  console.log(`wing-body seam: ${seamed} wing vertices within ${SEAM_R} of the body take part of its weights`);
 }
 chain.forEach((node) => skin.addJoint(node));
 const oldIBM = skin.getInverseBindMatrices().getArray(), ibm = new Float32Array((nOld + K) * 16); ibm.set(oldIBM);

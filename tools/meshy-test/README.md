@@ -223,3 +223,15 @@ Seen in the recording (dive and pull-out, u 0.40-0.58): the tail rose vertically
 and accumulate along 9-joint strips (and the flutter too). Now each trailing term is bounded in TOTAL (about 10 degrees) and spread over
 the chain (1 / K per joint), the flutter of long strips is scaled to the same total as a short one, the original tail bones likewise.
 Result: worst 95 -> 24 degrees; pull-up +36 -> +7. Legs' load term bounded too.
+
+### The wing came off the body (16/10/2026, "asa quebrada em 2 partes, buraco na parte inferior")
+Measured (`lab-wingbody`: contact pairs wing x body in the bind pose, their gap per pose, which side moves): 25-30 cm in flight, 10 cm
+even standing; the WING moves (40 cm), the body does not. Two causes:
+1. the wing's symmetry correction (balance 18 degrees + roll 14-24 degrees) was applied at the SHOULDER, which touches the body: now at the
+   ARM (`fold.correctAt = 1`): standing gap 10 -> 1.2 cm.
+2. the chest turns ~80 degrees into the flight posture and the wing must NOT (the sculpt's wing is already spread; tried: making the
+   shoulder follow the spine stood the wing up and doubled the gap). So the junction has to be skin: `rig-spine.mjs` now has a
+   wing-body SEAM: every wing vertex within SEAM_R = 0.2 of the body's surface takes the weights of the nearest body vertex (spine /
+   pelvis, not the legs), with a share falling from 1 (touching) to 0. Gap in flight: median 25-30 cm -> 4-5 cm.
+Price: stretched edges 0.20 % -> 0.26-0.33 % in flight, in the seam (that is the armpit skin stretching). Limiting the seam to the
+shoulder area (SHOULDER_R0/R1) brought the gaps back (other wing parts lie against the body), so it is off.
