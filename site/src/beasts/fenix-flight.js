@@ -42,7 +42,7 @@ export const FOLD = {
   fanBias: 0.0,
   tuckLegs: 1,
   rollA: 0.25, rollB: 0.42,  // radians: roll of each wing about its own axis (the sculpt's two wings are not mirror images; found in the lab)
-  backK: 0.7,        // how much of its wing's shoulder movement a back feather follows (measured: see the lab)
+  backK: 0.7,
 };
 
 // ───────────── small quaternion kit on Float64Array scratch ([x, y, z, w]) ─────────────
@@ -146,7 +146,7 @@ export function createFenixFlight(model, opts = {}) {
   LEGS.forEach((chain, li) => chain.forEach((k, j) => set(k, { kind: 'leg', j, side: li === 0 ? 1 : -1, li })));
   TAILS.forEach((chain, c) => chain.forEach((k, j) => set(k, { kind: 'tail', j, c, len: chain.length })));
   CREST.forEach((k, j) => set(k, { kind: 'crest', j }));
-  BACK.forEach(([a, b, c, sh], bi) => [a, b, c].forEach((k, j) => set(k, { kind: 'back', j, shoulder: sh, bi, shRole: null })));
+  BACK.forEach(([a, b, c, sh], bi) => [a, b, c].forEach((k, j) => set(k, { kind: 'back', j, shoulder: sh, bi, shRole: null, bone: k })));
   set(0, { kind: 'root' });
   set(1, { kind: 'pelvis' });                              // Bone_001 carries the belly, the legs and the tail base: it must move too
   // the spine chain (rig-spine.mjs): pelvis -> chest -> neck -> head, K joints. Bone_008/007/033/032 are dead (no weights).
@@ -159,6 +159,19 @@ export function createFenixFlight(model, opts = {}) {
     restTheta[j] = (Math.atan2(restWP[b * 3 + 1] - restWP[a * 3 + 1], -(restWP[b * 3] - restWP[a * 3])) * 180) / Math.PI;
   }
   spine.forEach((bi, j) => { role[bi] = { kind: 'spine', j }; });
+  /** where a bone sits along the spine: segment a..b and t between them (by the closest point of its REST position on the centre line) */
+  const spineMix = (i) => {
+    // the rotation of a joint steers the segment from it to its child, so the joint follows the spine at the MIDDLE of that segment
+    const ch = bones[i].children.find((c) => c.isBone), ci = ch ? byName.get(ch.name) : i;
+    const x = (restWP[i * 3] + restWP[ci * 3]) / 2, y = (restWP[i * 3 + 1] + restWP[ci * 3 + 1]) / 2, z = (restWP[i * 3 + 2] + restWP[ci * 3 + 2]) / 2; let best = Infinity, bj = 0, bt = 0;
+    for (let j = 0; j < K - 1; j++) {
+      const a = spine[j] * 3, b = spine[j + 1] * 3, dx = restWP[b] - restWP[a], dy = restWP[b + 1] - restWP[a + 1], dz = restWP[b + 2] - restWP[a + 2], l2 = dx * dx + dy * dy + dz * dz || 1e-9;
+      const t = Math.max(0, Math.min(1, ((x - restWP[a]) * dx + (y - restWP[a + 1]) * dy + (z - restWP[a + 2]) * dz) / l2));
+      const d = (x - restWP[a] - dx * t) ** 2 + (y - restWP[a + 1] - dy * t) ** 2 + (z - restWP[a + 2] - dz * t) ** 2;
+      if (d < best) { best = d; bj = j; bt = t; }
+    }
+    return { a: bj, b: bj + 1, t: bt };
+  };
 
   // feather chains: F_<region>_<n>_<i>
   const feathers = new Map();
@@ -181,7 +194,7 @@ export function createFenixFlight(model, opts = {}) {
       const ax = [hd[0] - sh[0], hd[1] - sh[1], hd[2] - sh[2]], L2 = ax[0]*ax[0] + ax[1]*ax[1] + ax[2]*ax[2];
       f.s = Math.max(0, Math.min(1, ((r[0] - sh[0]) * ax[0] + (r[1] - sh[1]) * ax[1] + (r[2] - sh[2]) * ax[2]) / L2));
     } else f.s = 0;
-    f.joints.forEach((i, j) => { if (i !== undefined) role[i] = { kind: 'feather', f, j }; });
+    f.joints.forEach((i, j) => { if (i !== undefined) role[i] = { kind: 'feather', f, j, bi: i }; });
   }
   // tail feather chains spread about their roots by their lateral position
   let zMin = Infinity, zMax = -Infinity;
@@ -244,7 +257,9 @@ export function createFenixFlight(model, opts = {}) {
         const comb = f.region === 'crest' ? -P.fly * (j === 0 ? 0.55 : 0.18) : f.region === 'back' ? -P.fly * (j === 0 ? 0.35 : 0.1) : 0;         // the wind combs head and mane strands back
         ry(A, f.A * g * flutter + turn + spread);
         rz(B, f.A * g * 0.8 * Math.sin(TAU * (ph - f.lagBeat) - 0.4 * j) * fl + pit + comb);
-        qmul(C, A, B); return qmul(out, base, C);
+        qmul(C, A, B);
+        if (f.region === 'back') return qmul(out, spineAt(r.bi, r, E), C);        // a back feather lies ON the back: each joint follows the spine where it sits
+        return qmul(out, base, C);
       }
       case 'tail': {
         const idx = r.j;
@@ -253,14 +268,10 @@ export function createFenixFlight(model, opts = {}) {
         qmul(C, A, B); return qmul(out, base, C);
       }
       case 'pelvis': {
-        // the lower body: it rides the wing beat (rises and tilts with the stroke, a touch after the chest), leans into the turn,
-        // pitches toward the flight posture, and breathes. Everything below it (belly, legs, tail base) goes with it.
-        const f = P.fly, fl = P.flap, st = P.stretch;
-        const th = -(restTheta[0] - FLIGHT_THETA[0]) * f * 0.5 + (3.4 + 1.6 * st) * Math.sin(TAU * (P.phase + 0.10)) * fl * f + 1.0 * Math.sin(TAU * (t / 4.2) + 0.5);
-        rz(A, (th * Math.PI) / 180);
-        ry(B, 0.05 * Math.sin(TAU * (P.phase + 0.35)) * fl * f - P.yawRate * 0.12);
-        rx(C, -P.bank * 0.22 + 0.02 * Math.sin(TAU * (t / 5.3)));
-        qmul(D, A, B); qmul(E, D, C); return qset(out, E[0], E[1], E[2], E[3]);
+        // Bone_001 carries the belly, the legs and the tail base; Spine_00 carries the back right above it. They MUST move as one
+        // piece (they used to follow two different rules and a gap of 4-14 cm opened between the back and the tail root): the pelvis
+        // takes exactly the delta of Spine_00, which holds the pelvis's own motion (see 'spine', j = 0).
+        return deltaOf(r.spine0 ?? (r.spine0 = role[byName.get('Spine_00')]), base, P, out);
       }
       case 'leg': {
         const L = P.legs, j = r.j, f = P.fly;
@@ -282,17 +293,9 @@ export function createFenixFlight(model, opts = {}) {
         return qmul(out, base, A);
       }
       case 'back': {
-        // follows 60 % of its wing's shoulder movement RELATIVE to the spine joint the wing hangs from (Meshy mixed their weights
-        // with the wing bones, so without this the mixed vertices shear), on top of the pose of its own parent
-        const sh = r.shRole ?? (r.shRole = role[idxOf(r.shoulder)]), sp = r.spIdx ?? (r.spIdx = parent[idxOf(r.shoulder)]);
-        deltaOf(sh, ID, P, D);                                         // the shoulder's absolute delta
-        qconj(E, ld3(sp));                                              // inverse of the spine joint's delta
-        qmul(C, E, D);                                                  // the wing's movement relative to its spine joint
-        const k = r.j === 0 ? fold.backK : 0,                           // ONLY the base joint follows the wing: the chain inherits it (it used to compound x1.85, x2.5 along the feather and bend it)
-        ang = 2 * Math.acos(Math.min(1, Math.abs(C[3]))), sg = C[3] < 0 ? -1 : 1, si = Math.sin(ang / 2);
-        if (ang < 1e-5 || !si) qset(E, 0, 0, 0, 1); else qaxis(E, (sg * C[0]) / si, (sg * C[1]) / si, (sg * C[2]) / si, ang * k);
+        // the original Meshy back bones (roots of the feather groups): same idea, they follow the spine where they sit
         rz(A, 0.04 * Math.sin(TAU * (2 * t / 2.5 - 0.2 - 0.12 * r.j)));
-        qmul(C, E, A); return qmul(out, base, C);
+        return qmul(out, spineAt(r.bone === undefined ? 0 : idxOf(r.bone), r, E), A);
       }
       case 'spine': {
         // each segment of the chain is posed to an ABSOLUTE direction: standing (rest) .. flight (horizontal body, stretched neck).
@@ -315,17 +318,32 @@ export function createFenixFlight(model, opts = {}) {
         rz(A, ((th + wave + pit + nk + nk2) * Math.PI) / 180);
         ry(B, yaw - P.bank * 0.28 * (j / K) + (j < K - 5 ? 0.02 * Math.sin(TAU * (t / 6) - 0.5 * j) : 0));
         rx(D, roll);
+        if (j === 0) {                                                                       // the pelvis end: it also rides the wing beat a touch after the chest, leans into the turn, breathes
+          rz(tmp3, ((3.4 + 1.6 * st) * Math.sin(TAU * (P.phase + 0.10)) * P.flap * f * Math.PI) / 180);
+          qmul(E, tmp3, A); qset(A, E[0], E[1], E[2], E[3]);
+          ry(E, 0.05 * Math.sin(TAU * (P.phase + 0.35)) * P.flap * f - P.yawRate * 0.12); qmul(tmp3, E, B); qset(B, tmp3[0], tmp3[1], tmp3[2], tmp3[3]);
+          rx(D, -P.bank * 0.22 + 0.02 * Math.sin(TAU * (t / 5.3)));
+        }
         qmul(C, B, A); qmul(E, C, D); return qset(out, E[0], E[1], E[2], E[3]);        // yaw (outer) * pitch * roll (inner): a turned head keeps its elevation
       }
       default: return qset(out, base[0], base[1], base[2], base[3]);
     }
   }
 
+  // pose-wide cache: the spine segments' deltas (they depend on P only, never on a parent), read by everything that lies ALONG the back
+  const spD = new Float64Array(K * 4), sm1 = new Float64Array(4);
+  function spineAt(i, role_, out) {                                  // slerp of the spine deltas around the rest position of bone i
+    const m = role_.mix ?? (role_.mix = spineMix(i)), a = m.a * 4, b = m.b * 4, t = m.t;
+    let dot = spD[a] * spD[b] + spD[a + 1] * spD[b + 1] + spD[a + 2] * spD[b + 2] + spD[a + 3] * spD[b + 3], sg = dot < 0 ? -1 : 1;
+    for (let c = 0; c < 4; c++) out[c] = spD[a + c] * (1 - t) + sg * spD[b + c] * t;
+    return qnorm(out);
+  }
   const baseTmp = new Float64Array(4), outQ = new Float64Array(4), pqA = new Float64Array(4), rwA = new Float64Array(4), rlA = new Float64Array(4);
   const ld = (o, arr, i) => { o[0] = arr[i * 4]; o[1] = arr[i * 4 + 1]; o[2] = arr[i * 4 + 2]; o[3] = arr[i * 4 + 3]; return o; };
   function pose(P) {
     P = { ...FLIGHT_DEFAULTS, ...P };
     P.flap *= RATE_DAMP(P.rate);                                  // the scroll made the beat faster than a bird could: the stroke shrinks
+    for (let j = 0; j < K; j++) { deltaOf(role[spine[j]], ID, P, sm1); spD[j * 4] = sm1[0]; spD[j * 4 + 1] = sm1[1]; spD[j * 4 + 2] = sm1[2]; spD[j * 4 + 3] = sm1[3]; }
     for (let i = 0; i < n; i++) {
       const pi = parent[i], r = role[i];
       if (pi < 0) { ld(pqA, parentRestQ, i); qset(baseTmp, 0, 0, 0, 1); }            // root-level bone: its (non-bone) parent is fixed

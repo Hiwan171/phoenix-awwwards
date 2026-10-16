@@ -185,3 +185,17 @@ keeps ONLY its dominant group's weights (>= 30 % of the piece, another group >= 
 untouched. 650 pieces / 29.8k vertices of 450k. Result (web GLB): stretched edges per pose 624-726 -> 173-206 (0.26-0.30 % -> 0.07-0.09 %),
 worst 35-55x -> 17-31x; the union over the 5 poses 1098 -> 371. No cracks seen in the renders (pieces are separate components).
 What is left (~370): pieces that straddle the spine and the back bones (Spine_07 + Bone_048), tail root x back feathers, thigh x back.
+
+### The tail root detached from the back (16/10/2026, user's top-view screenshot)
+- Measured (`lab-gap`): contact pairs (vertices of two pieces closer than 1.2 cm in the bind pose) and how far apart they are in each
+  pose. Tail vs BACK feathers: median gap 32 cm in flight (0.8 cm standing). Tail vs legs: 7 cm when tucked (they tuck back, natural).
+- Cause 1 (fixed): Bone_001 (pelvis: tail, legs, belly) and Spine_00 (the back above it) followed two different rules; the pelvis now
+  returns exactly Spine_00's delta (which holds the pelvis motion: beat pitch, yaw, roll).
+- Cause 2 (the big one): the back feathers had their own chains hanging from the CHEST, but they lie along the back toward the tail:
+  when the posture changes the chest moves ~39 cm forward and 79 degrees, the tail root only 12, and the feathers stretched between
+  (tail moves 7 cm, back pieces 37 cm). Fix: `rig-spine.mjs` skins the back feather pieces (146 joints) to the SPINE by position like
+  the rest of the body (`BACK_TO_SPINE=0` keeps the chains). Gap: median 32 cm -> 1.2 cm; top-view renders flow from back to tail in
+  every pose. Cost: the back feathers no longer flutter on their own chains (they were small and covered).
+- Trap: the centre line of the spine must be fitted on the ORIGINAL spine vertices only (`fitSet`); adding the back feathers to that set
+  pulled the joints and the whole tail stood up vertically (found in the render, not in the numbers).
+- Stretched edges now 0.10 % in flight (0.015 % folded), body/neck 86-100 (was ~30): the price of the re-skin, acceptable.

@@ -31,8 +31,17 @@ const skin = root.listSkins()[0], joints = skin.listJoints(), names = joints.map
 const byName = new Map(joints.map((j) => [j.getName(), j]));
 const J = prim.getAttribute('JOINTS_0').getArray(), Wt = prim.getAttribute('WEIGHTS_0').getArray();
 const oldSet = new Set(OLD.map((nm) => names.indexOf(nm)));
+const fitSet = new Set(oldSet);                                  // the centre line is fitted on the ORIGINAL spine vertices only
+// The back feathers lie ON the back, between the chest and the tail root: their own chains hang from the chest and swing 35 cm away from
+// the tail when the posture changes (measured). Skinning them to the spine BY POSITION, like the rest of the body, keeps them on it.
+// (BACK_TO_SPINE=0 keeps the chains.)  Their bones stay in the rig, unused.
+const BACK_JOINTS = process.env.BACK_TO_SPINE === '0' ? [] : names.map((nm, i) => (/^F_back_/.test(nm) || /^Bone_04[3-8]$/.test(nm) ? i : -1)).filter((i) => i >= 0);
+for (const i of BACK_JOINTS) oldSet.add(i);
+console.log(`back feather joints skinned to the spine: ${BACK_JOINTS.length}`);
 
 // ── 1. alpha ──
+const alphaFit = new Float32Array(nV);
+for (let v = 0; v < nV; v++) { let a = 0; for (let k = 0; k < 4; k++) if (fitSet.has(J[v*4+k])) a += Wt[v*4+k]; alphaFit[v] = a; }
 const alpha = new Float32Array(nV);
 for (let v = 0; v < nV; v++) { let a = 0; for (let k = 0; k < 4; k++) if (oldSet.has(J[v*4+k])) a += Wt[v*4+k]; alpha[v] = a; }
 let nRegion = 0; for (let v = 0; v < nV; v++) if (alpha[v] >= 0.35) nRegion++;
@@ -45,7 +54,7 @@ console.log(`vertices with spine mass >= 0.35: ${nRegion}`);
 const pelvis = byName.get('Bone_001').getWorldTranslation();
 const GUIDE = [[pelvis[0], pelvis[1], pelvis[2]], [-0.88, 0.46, 0.10], [-1.05, 0.50, 0.15], [-1.18, 0.62, 0.19], [-1.26, 0.78, 0.19], [-1.22, 0.93, 0.16], [-1.12, 1.08, 0.12], [-1.05, 1.22, 0.09], [-1.03, 1.38, 0.05]];
 // vertices that shape the line: not the hair at the back of the head (it hangs far behind the neck and would pull the end back)
-const reach = []; for (let v = 0; v < nV; v++) if (alpha[v] >= 0.5 && !(pos[v*3+1] > 1.0 && pos[v*3] > -0.92)) reach.push(v);
+const reach = []; for (let v = 0; v < nV; v++) if (alphaFit[v] >= 0.5 && !(pos[v*3+1] > 1.0 && pos[v*3] > -0.92)) reach.push(v);
 const gl = [0]; for (let i = 1; i < GUIDE.length; i++) gl.push(gl[i-1] + Math.hypot(...[0,1,2].map((c) => GUIDE[i][c] - GUIDE[i-1][c])));
 const centres = Array.from({ length: K }, (_, k) => {
   const d = (gl[gl.length - 1] * k) / (K - 1); let i = 1; while (i < GUIDE.length - 1 && gl[i] < d) i++;
