@@ -9,6 +9,8 @@ import * as THREE from 'three';
 
 const TAU = Math.PI * 2;
 
+const smooth01 = (x) => { x = x < 0 ? 0 : x > 1 ? 1 : x; return x * x * (3 - 2 * x); };
+
 /** Monotone cubic Hermite (Fritsch-Carlson) through (xs, ys). Smooth (C1) and never overshoots the keys. */
 function pchip(xs, ys) {
   const n = xs.length, h = [], d = [], m = new Array(n).fill(0);
@@ -40,13 +42,12 @@ export function createTimeline(keys) {
   return { keys, at(u) { const o = { u }; for (const nme of names) o[nme] = fn[nme](u); return o; } };
 }
 
-export function createPath(points, { bankGain = 5.0, maxBank = 0.65, bankSign = 1 } = {}) {
+export function createPath(points, { bankGain = 2.4, maxBank = 0.55, bankSign = 1 } = {}) {
   const curve = new THREE.CatmullRomCurve3(points.map((p) => new THREE.Vector3(...p)), false, 'centripetal');
   curve.arcLengthDivisions = 800;
   const length = curve.getLength();
   const up = new THREE.Vector3(0, 1, 0), fwdAxis = new THREE.Vector3(0, 0, -1);
   const f = new THREE.Vector3(), f0 = new THREE.Vector3(), f1 = new THREE.Vector3(), tmpQ = new THREE.Quaternion(), rollQ = new THREE.Quaternion();
-  const heading = (v) => Math.atan2(v.x, v.z);
   const dU = 0.012;
   const clampU = (u) => Math.min(1, Math.max(0, u));
   return {
@@ -57,11 +58,15 @@ export function createPath(points, { bankGain = 5.0, maxBank = 0.65, bankSign = 
       curve.getPointAt(u, out.pos); curve.getTangentAt(u, out.fwd).normalize();
       curve.getTangentAt(clampU(u - dU), f0); curve.getTangentAt(clampU(u + dU), f1);
       const span = clampU(u + dU) - clampU(u - dU) || 1;
-      let dh = heading(f1) - heading(f0); dh = Math.atan2(Math.sin(dh), Math.cos(dh));           // wrapped
-      out.yawRate = dh / span;                                                                    // rad per unit of u
+      // turn rate from the tangent's change, well conditioned even when the path climbs almost vertically (there the horizontal
+      // heading is ill-defined, so the rate is faded out instead of exploding): kappa = rad of heading per unit of LENGTH
+      const dsLen = span * length || 1;
+      const dfx = (f1.x - f0.x) / dsLen, dfz = (f1.z - f0.z) / dsLen, hh = Math.hypot(out.fwd.x, out.fwd.z);
+      const kappa = ((out.fwd.z * dfx - out.fwd.x * dfz) / Math.max(hh * hh, 0.05)) * smooth01((hh - 0.15) / 0.35);
+      out.yawRate = kappa * length;                                                               // rad per unit of u
       out.pitch = Math.asin(THREE.MathUtils.clamp(out.fwd.y, -1, 1));
       out.pitchRate = (Math.asin(THREE.MathUtils.clamp(f1.y, -1, 1)) - Math.asin(THREE.MathUtils.clamp(f0.y, -1, 1))) / span;
-      out.bank = bankSign * THREE.MathUtils.clamp(out.yawRate * bankGain * 0.02, -maxBank, maxBank);
+      out.bank = bankSign * THREE.MathUtils.clamp(kappa * bankGain, -maxBank, maxBank);
       // orientation: the model faces -z; turn it to the tangent (shortest arc, no stray roll), then roll about its own forward axis
       tmpQ.setFromUnitVectors(fwdAxis, out.fwd);
       // keep the wings level before banking: remove the roll the arc may carry by re-aiming the up vector

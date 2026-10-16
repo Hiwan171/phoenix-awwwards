@@ -91,7 +91,7 @@ function applyManual() {
 function placeCamera(b) {
   if (mode === 'manual' || camMode === 'free') { controls.enabled = true; controls.target.copy(bird.position); return; }
   controls.enabled = false;
-  if (camMode === 'chase') chaseCamera(demo.path, u, { back: 3.4, up: 1.1, side: 1.4 }, cam);
+  if (camMode === 'chase') chaseCamera(demo.path, u, { back: 2.4, up: 1.0, side: 2.6 }, cam);
   else if (camMode === 'side') { const r = new THREE.Vector3().crossVectors(b.fwd, new THREE.Vector3(0, 1, 0)).normalize(); cam.pos.copy(b.pos).addScaledVector(r, 4.6).add(new THREE.Vector3(0, 0.5, 0)); cam.target.copy(b.pos); }
   else { cam.pos.set(9, 9, 12); cam.target.copy(b.pos); }
   camera.position.copy(cam.pos); camera.lookAt(cam.target);
