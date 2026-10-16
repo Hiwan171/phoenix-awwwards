@@ -142,3 +142,18 @@ in flight posture, 0.42 % in the swept dive; no pops along the path; 60 fps; ~1.
   on average (35 max) away from where a dead head would be; no step above 3 degrees except at the saccades.
 - Feather flutter grows in the airflow (stretched, not beating): amplitude x1.7, frequency x1.3 at most (x2.6 / x2.6 first: 21 degrees
   per step, violent).
+
+### Head posture, load, rate, landing (16/10/2026, second recording)
+- ROOT CAUSE of the "sleeping" head: the head joint's bone is VERTICAL at rest (the standing bird) and the beak is perpendicular to it.
+  Posing the last spine segments to ~10 degrees above the horizontal therefore pointed the beak DOWN in every flight. `FLIGHT_THETA`
+  now ends [.., 50, 72, 84]: the neck rises in an S and a head segment at ~85 degrees keeps the beak forward. The pitch compensation
+  also had the wrong sign (it raised the body and lowered the head); now `+HEAD_STAB * pitch` (0.75: the head ends up within a few
+  degrees of looking ahead at the horizon in a -35 degree dive and a +35 degree climb). Checked by rendering pitch -0.6 / 0 / +0.6.
+- `P.rate` (Hz): when the scroll makes the beat faster than ~1.6 Hz the stroke shrinks smoothly (`RATE_DAMP`): a blur, not a frenzy.
+- `P.load` (pull-up +, push-over -) from the path's pitch rate: wing tips flex up, tail and legs trail, the neck lags.
+- Back feathers: only the base joint follows the wing (the chain used to compound x1.85, x2.5); `fold.backK` 0.7. Their stretch
+  (~250 edges) is NOT caused by the controller: the web GLB's mesh simplification bridges nearby feathers (measured: same count in
+  the full-resolution file); to fix it, simplify per piece or protect the borders.
+- Landing: `P.ground` (timeline key) puts the lowest foot ON the ground whatever the pose.
+- NOT done: eyes and beak. The model has no eyelid or jaw geometry (the eye is baked in the texture; the closed beak has no mouth
+  interior), so a blink or an opening beak would need a remodel or a texture-space eyelid; see the report.

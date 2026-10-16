@@ -60,6 +60,8 @@ holder.rotation.y = -Math.PI / 2; holder.scale.setScalar(1 / 1.7); holder.positi
 holder.add(model);
 const bird = new THREE.Group(); bird.add(holder); scene.add(bird);
 const flight = createFenixFlight(model);
+const footBones = ['Bone_002', 'Bone_009'].map((nm) => flight.bones[flight.byName.get(nm)]), tmpV = new THREE.Vector3();
+const FOOT_MARGIN = 0.012;                                // the toe tips are a little below the foot joints (scaled units: the bird is 1 tall)
 console.log('flight rig:', flight.bones.length, 'bones,', flight.feathers.size, 'feather chains; path', demo.path.length.toFixed(1), 'units');
 
 // ── state: either the timeline (scroll) or hand-set parameters ──
@@ -68,11 +70,13 @@ let mode = 'scroll', u = +(Q.get('u') ?? 0), autoplay = false, camMode = 'chase'
 const lenis = new Lenis({ lerp: 0.09 });
 const cam = { pos: new THREE.Vector3(), target: new THREE.Vector3() };
 
+let uVel = 0, prevU = 0;                                  // scroll speed in progress per second (smoothed): only used to tame the beat rate
 function paramsAt(uu) {
   const k = demo.timeline.at(uu), b = demo.path.at(uu);
+  const e = 0.004, dB = (demo.timeline.at(Math.min(1, uu + e)).beats - demo.timeline.at(Math.max(0, uu - e)).beats) / (2 * e);   // beats per unit of progress
   return {
     t: uu * demo.seconds, phase: k.beats, flap: k.flap, open: k.open, sweep: k.sweep, legs: k.legs, tail: k.tail, fly: k.fly, stretch: k.stretch,
-    bank: b.bank, pitch: b.pitch + k.pitchBias, pitchRate: b.pitchRate * 0.08, yawRate: b.yawRate * 0.08, lookYaw: Math.max(-0.55, Math.min(0.55, b.yawRate * 0.055)), lookPitch: Math.max(-0.2, Math.min(0.2, -b.pitchRate * 0.01)), alert: k.alert,
+    bank: b.bank, pitch: b.pitch + k.pitchBias, pitchRate: b.pitchRate * 0.08, yawRate: b.yawRate * 0.08, lookYaw: Math.max(-0.55, Math.min(0.55, b.yawRate * 0.055)), lookPitch: Math.max(-0.2, Math.min(0.2, -b.pitchRate * 0.01)), alert: k.alert, ground: k.ground, rate: Math.abs(dB * uVel), load: Math.max(-1, Math.min(1, b.pitchRate * 0.08 * 1.2)),
   };
 }
 function applyU(uu) {
@@ -80,6 +84,12 @@ function applyU(uu) {
   bird.position.copy(b.pos); bird.quaternion.copy(b.quat);
   bird.rotateX(P.pitch - b.pitch);                       // the timeline's body pitch on top of the path's own (nose up to brake, to pull up)
   flight.pose(P);
+  // ground contact: where the timeline says she is on the ground, the lowest foot is put ON the ground (y = 0), whatever the pose
+  if (P.ground > 0.001) {
+    bird.updateMatrixWorld(true);
+    let low = Infinity; for (const bn of footBones) { bn.getWorldPosition(tmpV); low = Math.min(low, tmpV.y); }
+    bird.position.y += P.ground * (FOOT_MARGIN - low);
+  }
   return { P, b };
 }
 function applyManual() {
@@ -170,6 +180,7 @@ function frame(now) {
     if (autoplay) { u = Math.min(1, u + dt / playSeconds); if (u >= 1) autoplay = false; lenis.scrollTo(u * lenis.limit, { immediate: true }); }
     else u = Math.min(1, Math.max(0, lenis.limit ? lenis.scroll / lenis.limit : 0));
     $('u').value = u; $('o-u').textContent = u.toFixed(3);
+    uVel += ((u - prevU) / Math.max(dt, 1e-3) - uVel) * 0.15; prevU = u;
     const { P, b } = applyU(u); placeCamera(b); hud(P, b);
   } else { applyManual(); placeCamera(null); controls.update(); $('hud').textContent = ''; }
   if (controls.enabled) controls.update();
@@ -183,7 +194,7 @@ requestAnimationFrame(frame);
 // QA hooks (headless scripts)
 window.__lab = {
   THREE, scene, camera, bird, flight, demo, skinned, manual,
-  setU(uu) { hold = true; mode = 'scroll'; autoplay = false; u = uu; const r = applyU(uu); placeCamera(r.b); hud(r.P, r.b); renderer.render(scene, camera); return r; },
+  setU(uu) { uVel = 0; hold = true; mode = 'scroll'; autoplay = false; u = uu; const r = applyU(uu); placeCamera(r.b); hud(r.P, r.b); renderer.render(scene, camera); return r; },
   setManual(p, cam) { hold = true; setMode('manual'); Object.assign(manual, p); applyManual(); if (cam) { camera.position.set(...cam.pos); controls.target.set(...(cam.target ?? [0, 0, 0])); camera.lookAt(controls.target); controls.enabled = false; } renderer.render(scene, camera); },
   setCamMode(m) { camMode = m; V.freeInit = false; },
   setDist(d) { camCfg.dist = d; },
