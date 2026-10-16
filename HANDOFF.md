@@ -122,6 +122,12 @@ sozinho.** Estado: **dragão e fênix prontos**; tigre e tartaruga aguardam. Tud
   para cima, então ficou leve); arestas esticadas ao longo do voo 0,02-0,23 % (pior na pose dobrada); sem saltos (<= 6,5 graus por
   passo de 0,0005 em u); 60 fps (web e lite); pose custa ~0,9 ms por quadro. QA: `__lab.setU(u)`, `__lab.setManual(P, cam)`.
 
+- **Voo realista = corpo esticado (16/10/2026).** O primeiro teste voava "em pé" e rígido: o rig do Meshy carrega corpo, pescoço
+  e cabeça com 9 ossos todos abaixo de y 1,15. Agora `tools/meshy-test/rig-spine.mjs` dá uma coluna de 11 juntas (pélvis -> cabeça)
+  e `rig-feathers.mjs` ganhou a região "crista" (96 penachos/fios da cabeça). O controlador ganhou `P.fly` (0 em pé .. 1 postura de voo:
+  corpo na horizontal, pescoço à frente, cabeça nivelada) e `P.stretch`; a linha do tempo da demo os dirige. O laboratório carrega
+  `fenix-flight-{web,lite}.glb` (3,65 / 1,63 MB); o hero continua com `fenix-meshy-*.glb` e o clipe Hover até religarmos.
+
 ### Performance — o que medimos (Intel UHD 620 / i5-10210U, 1080p; vale para as novas feras)
 - **Resultado:** o hero com a fênix foi de **19,5 → 38,8 fps** (A/B intercalado, vsync ligado) com visual equivalente
   (diff de pixels: corpo PSNR 61–71 dB; chamas estatisticamente iguais), e o governador leva a ~55–60 fps nos tiers altos.

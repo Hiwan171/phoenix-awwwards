@@ -101,3 +101,24 @@ feathers follow 60 % of their wing's shoulder (rotation AND position about the s
 
 **Known gaps:** a frontal tail "fringe" (the real tail seen from the front), white specular glints on the wings, folded wing not
 tested (the sculpt is an open wing; pouso/ovo need it), legs and crest only get a small motion, no IK on the paws.
+
+## Flight rig: feathers + a real spine (16/10/2026)
+
+    node tools/meshy-test/rig-feathers.mjs   # now with a 5th region, the crest/head strands  (210 feathers, ~1018 joints)
+    node tools/meshy-test/rig-spine.mjs      # model/meshy-test/Fenix_rig.glb -> Fenix_rig2.glb : 11 Spine_NN joints pelvis -> head
+    node tools/meshy-test/to-web.mjs model/meshy-test/Fenix_rig2.glb site/public/models/fenix-flight-web.glb 0.2 0.01 2048 2048 1024
+    node tools/meshy-test/to-web.mjs model/meshy-test/Fenix_rig2.glb site/public/models/fenix-flight-lite.glb 0.07 0.02 1024 1024 512
+
+Why: in the first flight test she flew UPRIGHT and stiff. Meshy carried the whole body, neck and head (51k vertices, y 0.4 to 1.7)
+with nine bones that all sit below y = 1.15, so the neck could not bend, the head could not stretch forward and the body could
+not undulate. `rig-spine.mjs` gives every vertex's old-spine weight (alpha) to a chain of 11 joints along the body/neck/head centre
+line by a cubic B-spline (smooth bending); the weights on wings, legs, tail and feathers are untouched; the wings, the crest chain
+and the back feathers are re-parented to the spine joint at THEIR height (both wings to the same one).
+Lessons: the centre line cannot come from surface distance (body, neck and head are many separate pieces): use a guide read off the
+height profile of the vertices, resample, re-centre three times, then smooth; leave the hair at the back of the head out of the
+fit (it hangs far behind the neck and pulls the end back); attach wings by HEIGHT, not by nearest joint (their z differs).
+
+The controller (`site/src/beasts/fenix-flight.js`) poses every spine segment to an ABSOLUTE direction between standing (rest) and
+flight (`P.fly`, `P.stretch`): body horizontal, neck reaching forward, head level, legs tucked back, tail and crest combed back, plus
+a wave that travels along the body with the wing beat. Measured (12 poses): body/neck 8-16 stretched edges, whole rig 0.23-0.28 %
+in flight posture, 0.42 % in the swept dive; no pops along the path; 60 fps; ~1.5 ms per pose (1096 bones).

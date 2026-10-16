@@ -49,7 +49,7 @@ const ground = new THREE.GridHelper(260, 260, 0x4b3f33, 0x241f1b); scene.add(gro
 }
 
 // ── the phoenix ──
-const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(`/models/fenix-meshy-${variant}.glb`);
+const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(`/models/fenix-flight-${variant}.glb`);
 const model = gltf.scene;
 let skinned = null;
 model.traverse((o) => {
@@ -71,7 +71,7 @@ const cam = { pos: new THREE.Vector3(), target: new THREE.Vector3() };
 function paramsAt(uu) {
   const k = demo.timeline.at(uu), b = demo.path.at(uu);
   return {
-    t: uu * demo.seconds, phase: k.beats, flap: k.flap, open: k.open, sweep: k.sweep, legs: k.legs, tail: k.tail,
+    t: uu * demo.seconds, phase: k.beats, flap: k.flap, open: k.open, sweep: k.sweep, legs: k.legs, tail: k.tail, fly: k.fly, stretch: k.stretch,
     bank: b.bank, pitch: b.pitch + k.pitchBias, pitchRate: b.pitchRate * 0.08, yawRate: b.yawRate * 0.08, lookYaw: -b.yawRate * 0.012, lookPitch: 0,
   };
 }

@@ -34,6 +34,7 @@ const REGIONS = {
   wingA: { bones: [36, 35, 34, 50, 49, 60, 59, 62, 61, 53, 52, 51], baseLine: [36, 35, 34, 50] },
   wingB: { bones: [39, 38, 37, 55, 54, 64, 63, 66, 65, 58, 57, 56], baseLine: [39, 38, 37, 55] },
   back:  { bones: [45, 44, 43, 48, 47, 46], baseLine: [32], minStrip: 80 },
+  crest: { bones: [42, 41, 40], baseLine: [42, 41], minStrip: 60 },       // crest feathers, whiskers and other strands of the head
 };
 const regionNames = Object.keys(REGIONS);
 const regionOfJoint = names.map((nm) => { const k = num(nm); return regionNames.findIndex((r) => REGIONS[r].bones.includes(k)); });   // -1 = none
