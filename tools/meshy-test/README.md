@@ -152,8 +152,11 @@ in flight posture, 0.42 % in the swept dive; no pops along the path; 60 fps; ~1.
 - `P.rate` (Hz): when the scroll makes the beat faster than ~1.6 Hz the stroke shrinks smoothly (`RATE_DAMP`): a blur, not a frenzy.
 - `P.load` (pull-up +, push-over -) from the path's pitch rate: wing tips flex up, tail and legs trail, the neck lags.
 - Back feathers: only the base joint follows the wing (the chain used to compound x1.85, x2.5); `fold.backK` 0.7. Their stretch
-  (~250 edges) is NOT caused by the controller: the web GLB's mesh simplification bridges nearby feathers (measured: same count in
-  the full-resolution file); to fix it, simplify per piece or protect the borders.
+  (~250 edges) is NOT caused by the controller. CORRECTION (16/10, measured): it is not the mesh simplification either (that claim was
+  wrong: the stretched edges are inside single pieces, none bridges two chains). The stretched vertices are still skinned to Meshy's
+  ORIGINAL back bones (Bone_043..048), whose weights Meshy mixes with the wing's forearm chain (e.g. 0.65 Bone_047 + 0.21 Bone_052 +
+  0.08 Bone_051): two chains that move differently shear the same piece. Fix: clean the weights per piece (drop the wing weights from
+  the pieces that belong to the back region and renormalise).
 - Landing: `P.ground` (timeline key) puts the lowest foot ON the ground whatever the pose.
 - NOT done: eyes and beak. The model has no eyelid or jaw geometry (the eye is baked in the texture; the closed beak has no mouth
   interior), so a blink or an opening beak would need a remodel or a texture-space eyelid; see the report.
