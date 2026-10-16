@@ -35,3 +35,6 @@ model/_*.glb
 
 # third-party asset used only for a rig study (licence unknown): never versioned
 v20.glb
+
+# screen recordings and other video captures dropped at the repo root: never versioned
+*.mp4

@@ -72,12 +72,13 @@ function paramsAt(uu) {
   const k = demo.timeline.at(uu), b = demo.path.at(uu);
   return {
     t: uu * demo.seconds, phase: k.beats, flap: k.flap, open: k.open, sweep: k.sweep, legs: k.legs, tail: k.tail,
-    bank: b.bank, pitch: b.pitch, pitchRate: b.pitchRate * 0.08, yawRate: b.yawRate * 0.08, lookYaw: -b.yawRate * 0.012, lookPitch: 0,
+    bank: b.bank, pitch: b.pitch + k.pitchBias, pitchRate: b.pitchRate * 0.08, yawRate: b.yawRate * 0.08, lookYaw: -b.yawRate * 0.012, lookPitch: 0,
   };
 }
 function applyU(uu) {
   const P = paramsAt(uu), b = demo.path.at(uu);
   bird.position.copy(b.pos); bird.quaternion.copy(b.quat);
+  bird.rotateX(P.pitch - b.pitch);                       // the timeline's body pitch on top of the path's own (nose up to brake, to pull up)
   flight.pose(P);
   return { P, b };
 }
