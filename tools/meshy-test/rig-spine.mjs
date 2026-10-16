@@ -42,6 +42,13 @@ console.log(`back feather joints skinned to the spine: ${BACK_JOINTS.length}`);
 // ── 1. alpha ──
 const alphaFit = new Float32Array(nV);
 for (let v = 0; v < nV; v++) { let a = 0; for (let k = 0; k < 4; k++) if (fitSet.has(J[v*4+k])) a += Wt[v*4+k]; alphaFit[v] = a; }
+// TAIL pieces that start FORWARD of the pelvis (the long plumes whose roots sit on the upper back, x < -0.72): their root must follow the
+// spine where it sits, not the tail bone (measured: they tore away from the back; 137 contact pairs with a gap > 10 cm in flight).
+// The share given to the spine fades in smoothly with how far forward the vertex is: 0 at x = -0.72, 1 at x = -0.95.
+const tailJoint = names.map((nm) => /^F_tail_/.test(nm) || /^Bone_0(1[4-9]|2[0-9]|3[01])$/.test(nm));
+const TAIL_X0 = +(process.env.TAIL_X0 ?? -0.72), TAIL_X1 = +(process.env.TAIL_X1 ?? -0.95);
+const alphaTail = new Float32Array(nV);
+for (let v = 0; v < nV; v++) { let m = 0; for (let k = 0; k < 4; k++) if (tailJoint[J[v*4+k]]) m += Wt[v*4+k]; if (m < 0.7) continue; const x = pos[v*3]; const t = Math.min(1, Math.max(0, (x - TAIL_X0) / (TAIL_X1 - TAIL_X0))); alphaTail[v] = t * t * (3 - 2 * t); }
 const alpha = new Float32Array(nV);
 for (let v = 0; v < nV; v++) { let a = 0; for (let k = 0; k < 4; k++) if (oldSet.has(J[v*4+k])) a += Wt[v*4+k]; alpha[v] = a; }
 let nRegion = 0; for (let v = 0; v < nV; v++) if (alpha[v] >= 0.35) nRegion++;
@@ -114,11 +121,12 @@ const nOld = joints.length, buffer = root.listBuffers()[0];
 const nJ = new Uint16Array(nV * 4), nW = new Float32Array(nV * 4);
 let changed = 0;
 for (let v = 0; v < nV; v++) {
-  if (alpha[v] <= 1e-4) { for (let k = 0; k < 4; k++) { nJ[v*4+k] = J[v*4+k]; nW[v*4+k] = Wt[v*4+k]; } continue; }
+  if (alpha[v] <= 1e-4 && alphaTail[v] <= 1e-4) { for (let k = 0; k < 4; k++) { nJ[v*4+k] = J[v*4+k]; nW[v*4+k] = Wt[v*4+k]; } continue; }
   const entries = new Map();
-  for (let k = 0; k < 4; k++) if (!oldSet.has(J[v*4+k]) && Wt[v*4+k] > 0) entries.set(J[v*4+k], (entries.get(J[v*4+k]) ?? 0) + Wt[v*4+k]);
+  const keep = 1 - alphaTail[v];
+  for (let k = 0; k < 4; k++) if (!oldSet.has(J[v*4+k]) && Wt[v*4+k] > 0) entries.set(J[v*4+k], (entries.get(J[v*4+k]) ?? 0) + Wt[v*4+k] * keep);
   const u = project(pos[v*3], pos[v*3+1], pos[v*3+2]) * (K - 1);
-  for (const [j, b] of bs(Math.min(K - 1.0001, u))) entries.set(nOld + j, (entries.get(nOld + j) ?? 0) + alpha[v] * b);
+  for (const [j, b] of bs(Math.min(K - 1.0001, u))) entries.set(nOld + j, (entries.get(nOld + j) ?? 0) + (alpha[v] * keep + alphaTail[v]) * b);
   const top = [...entries.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4), sum = top.reduce((s, e) => s + e[1], 0);
   for (let k = 0; k < 4; k++) { nJ[v*4+k] = top[k]?.[0] ?? 0; nW[v*4+k] = top[k] ? top[k][1] / sum : 0; }
   changed++;

@@ -199,3 +199,19 @@ What is left (~370): pieces that straddle the spine and the back bones (Spine_07
 - Trap: the centre line of the spine must be fitted on the ORIGINAL spine vertices only (`fitSet`); adding the back feathers to that set
   pulled the joints and the whole tail stood up vertically (found in the render, not in the numbers).
 - Stretched edges now 0.10 % in flight (0.015 % folded), body/neck 86-100 (was ~30): the price of the re-skin, acceptable.
+
+### Wing holes and the tail that started on the back (16/10/2026, recording `2026-10-16 13-50-07`)
+Pipeline now: `rig-feathers` -> `clean-weights` -> `blend-wing` (ALPHA 0.25) -> `rig-spine` -> `to-web`.
+- WING HOLE (measured with `lab-winggap`: pairs of vertices of different chains of the same wing that touch in the bind pose): gaps of
+  up to 17 cm between the big overlapping sheets (F_wingA_88 | 91 | 93, F_wingB_11 | 15 | 17). Cause: each sheet was 100 % on its own
+  chain and each chain hangs from ONE bone, and neighbouring sheets hang from different ones (Bone_053 vs Bone_035): they part when the
+  elbow folds / the arm beats. Meshy's original blended across the wing. Fixes: (a) wing feathers' flutter phase / frequency / beat lag
+  are smooth functions of where they sit on the wing instead of random hashes; (b) `blend-wing.mjs`: a wing vertex keeps ALPHA = 0.25
+  of its chain weights and takes 0.75 from the ORIGINAL weights (two strongest). Result: pairs with a gap > 4 cm 2315-6461 -> 0, max
+  17 cm -> 2 cm. Price: more stretched edges in the wings (0.07 % -> 0.18-0.23 % overall in flight); ALPHA 0.35 still leaves 35 pairs
+  of 4-13 cm, 0.15 stretches more: 0.25 is the compromise.
+- TAIL START (measured with `lab-gap` + the clusters of the worst pairs): the plumes Meshy skinned to a TAIL bone (Bone_025) but whose
+  roots sit on the upper back (x -0.9, y 0.9, next to the base of the neck) tore from the body when the tail moved (137 pairs with a
+  gap > 10 cm, up to 43 cm). `rig-spine.mjs` now gives the spine a share of every tail vertex that lies forward of the pelvis, fading in
+  from x = -0.72 to -0.95 (`TAIL_X0` / `TAIL_X1`): pairs with a gap > 10 cm 137 -> 0, max 7 cm.
+- Lesson: look at the p90 / the worst clusters, not just the median: the median was 1.2 cm while 10 % of the pairs were 37 cm apart.

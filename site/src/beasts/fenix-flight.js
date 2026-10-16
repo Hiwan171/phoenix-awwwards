@@ -194,6 +194,11 @@ export function createFenixFlight(model, opts = {}) {
       const ax = [hd[0] - sh[0], hd[1] - sh[1], hd[2] - sh[2]], L2 = ax[0]*ax[0] + ax[1]*ax[1] + ax[2]*ax[2];
       f.s = Math.max(0, Math.min(1, ((r[0] - sh[0]) * ax[0] + (r[1] - sh[1]) * ax[1] + (r[2] - sh[2]) * ax[2]) / L2));
     } else f.s = 0;
+    if (f.side) {                                   // WING feathers overlap in layers: neighbours must move together or a hole opens between them (measured: up to 17 cm).
+      // so their phase, frequency and beat lag are SMOOTH functions of where they sit on the wing (a wave travelling along it), not random
+      f.f1 = 2; f.f2 = 1; f.p1 = TAU * 0.9 * f.s; f.p2 = TAU * 0.5 * f.s + 1.0; f.lagBeat = 0.22 * f.s;
+      f.A = (0.045 + 0.02 * f.s);
+    }
     f.joints.forEach((i, j) => { if (i !== undefined) role[i] = { kind: 'feather', f, j, bi: i }; });
   }
   // tail feather chains spread about their roots by their lateral position
