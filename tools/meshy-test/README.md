@@ -132,3 +132,13 @@ in flight posture, 0.42 % in the swept dive; no pops along the path; 60 fps; ~1.
   (rides the beat a touch after the chest, leans into the turn, pitches toward the flight posture, breathes; belly, legs and tail
   base go with it) and the legs got a wave down the chain, airflow drag, splay with the turn and a slow flex of their own.
 - Lesson: never trust "dominant bone" names; measure the weight mass of each body zone by group before re-skinning.
+
+### A living head, and the bank sign (16/10/2026)
+- Measured, not assumed: `bankSign` was inverted: in a LEFT turn the LEFT wing went UP (leftWingWorldY +0.28). Now -1 (left wing down).
+- Head: the last five spine segments carry a share of the head's orientation (`HEAD_W`): it stays level against the body's pitch and
+  roll (the eyes keep the horizon), ignores most of the body wave, LEADS into the turns (lookYaw from the path's curvature), and scans
+  (`gazeAt`: fixations of 1.4-3.4 s joined by 0.2 s eased saccades, drift, tremor; all a pure function of time, so reversible).
+  `P.alert` calms the scanning on a dive. Neck: a slow S drift and a lead toward the next stroke. Measured: the head moves 13 degrees
+  on average (35 max) away from where a dead head would be; no step above 3 degrees except at the saccades.
+- Feather flutter grows in the airflow (stretched, not beating): amplitude x1.7, frequency x1.3 at most (x2.6 / x2.6 first: 21 degrees
+  per step, violent).

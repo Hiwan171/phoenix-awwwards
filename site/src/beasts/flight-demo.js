@@ -19,18 +19,18 @@ export const DEMO_POINTS = [
 
 // key = progress anchor (waypoint index w, plus an optional offset in waypoints) and the pose parameters
 const KEYS = [
-  { w: 0,   beats: 0,    flap: 0.60, open: 1.00, sweep: 0.00, legs: 0.10, tail: 0.50, fly: 0.35, stretch: 0.20, pitchBias: 0.00 },   // hovering, a slow beat
-  { w: 1,   beats: 3.0,  flap: 1.00, open: 1.00, sweep: 0.00, legs: 0.55, tail: 0.40, fly: 0.85, stretch: 0.50, pitchBias: 0.12 },   // climbing: strong beats, legs tuck
-  { w: 2,   beats: 9.0,  flap: 0.90, open: 1.00, sweep: 0.10, legs: 0.85, tail: 0.35, fly: 1.00, stretch: 0.50, pitchBias: 0.08 },
-  { w: 3,   beats: 14.0, flap: 0.45, open: 1.00, sweep: 0.00, legs: 0.85, tail: 0.50, fly: 1.00, stretch: 0.60, pitchBias: 0.00 },   // level, easing into the glide
-  { w: 4,   beats: 15.5, flap: 0.04, open: 1.00, sweep: 0.00, legs: 0.85, tail: 0.80, fly: 1.00, stretch: 1.00, pitchBias: 0.00 },   // glide: wings still, tail fanned
-  { w: 5,   beats: 15.5, flap: 0.00, open: 0.55, sweep: 0.85, legs: 1.00, tail: 0.15, fly: 1.00, stretch: 1.00, pitchBias: -0.08 },   // dive: wings half closed and swept back
-  { w: 6,   beats: 19.0, flap: 1.00, open: 1.00, sweep: 0.20, legs: 0.80, tail: 0.90, fly: 0.90, stretch: 0.50, pitchBias: 0.28 },   // pull up: wings open, strong beats
-  { w: 7,   beats: 23.0, flap: 0.90, open: 1.00, sweep: 0.00, legs: -0.35, tail: 1.00, fly: 0.55, stretch: 0.20, pitchBias: 0.12 },  // approach: legs reach forward
-  { w: 8,   beats: 26.0, flap: 1.00, open: 1.00, sweep: 0.00, legs: -1.00, tail: 1.00, fly: 0.25, stretch: 0.00, pitchBias: 0.55 },  // flare: braking beats
-  { w: 9,   beats: 27.2, flap: 0.35, open: 1.00, sweep: 0.00, legs: -0.60, tail: 0.80, fly: 0.10, stretch: 0.00, pitchBias: 0.30 },  // touch down
-  { w: 9.55, beats: 27.6, flap: 0.10, open: 0.45, sweep: 0.20, legs: 0.00, tail: 0.50, fly: 0.00, stretch: 0.00, pitchBias: 0.00 },  // standing: the wings come in
-  { w: 10,  beats: 27.8, flap: 0.00, open: 0.00, sweep: 0.00, legs: 0.00, tail: 0.50, fly: 0.00, stretch: 0.00, pitchBias: 0.00 },   // folded
+  { w: 0,   beats: 0,    flap: 0.60, open: 1.00, sweep: 0.00, legs: 0.10, tail: 0.50, fly: 0.35, stretch: 0.20, alert: 0.90, pitchBias: 0.00 },   // hovering, a slow beat
+  { w: 1,   beats: 3.0,  flap: 1.00, open: 1.00, sweep: 0.00, legs: 0.55, tail: 0.40, fly: 0.85, stretch: 0.50, alert: 0.70, pitchBias: 0.12 },   // climbing: strong beats, legs tuck
+  { w: 2,   beats: 9.0,  flap: 0.90, open: 1.00, sweep: 0.10, legs: 0.85, tail: 0.35, fly: 1.00, stretch: 0.50, alert: 0.55, pitchBias: 0.08 },
+  { w: 3,   beats: 14.0, flap: 0.45, open: 1.00, sweep: 0.00, legs: 0.85, tail: 0.50, fly: 1.00, stretch: 0.60, alert: 0.50, pitchBias: 0.00 },   // level, easing into the glide
+  { w: 4,   beats: 15.5, flap: 0.04, open: 1.00, sweep: 0.00, legs: 0.85, tail: 0.80, fly: 1.00, stretch: 1.00, alert: 0.80, pitchBias: 0.00 },   // glide: wings still, tail fanned
+  { w: 5,   beats: 15.5, flap: 0.00, open: 0.55, sweep: 0.85, legs: 1.00, tail: 0.15, fly: 1.00, stretch: 1.00, alert: 0.10, pitchBias: -0.08 },   // dive: wings half closed and swept back
+  { w: 6,   beats: 19.0, flap: 1.00, open: 1.00, sweep: 0.20, legs: 0.80, tail: 0.90, fly: 0.90, stretch: 0.50, alert: 0.50, pitchBias: 0.28 },   // pull up: wings open, strong beats
+  { w: 7,   beats: 23.0, flap: 0.90, open: 1.00, sweep: 0.00, legs: -0.35, tail: 1.00, fly: 0.55, stretch: 0.20, alert: 0.70, pitchBias: 0.12 },  // approach: legs reach forward
+  { w: 8,   beats: 26.0, flap: 1.00, open: 1.00, sweep: 0.00, legs: -1.00, tail: 1.00, fly: 0.25, stretch: 0.00, alert: 0.60, pitchBias: 0.55 },  // flare: braking beats
+  { w: 9,   beats: 27.2, flap: 0.35, open: 1.00, sweep: 0.00, legs: -0.60, tail: 0.80, fly: 0.10, stretch: 0.00, alert: 0.90, pitchBias: 0.30 },  // touch down
+  { w: 9.55, beats: 27.6, flap: 0.10, open: 0.45, sweep: 0.20, legs: 0.00, tail: 0.50, fly: 0.00, stretch: 0.00, alert: 1.00, pitchBias: 0.00 },  // standing: the wings come in
+  { w: 10,  beats: 27.8, flap: 0.00, open: 0.00, sweep: 0.00, legs: 0.00, tail: 0.50, fly: 0.00, stretch: 0.00, alert: 1.00, pitchBias: 0.00 },   // folded
 ];
 
 export function createDemoFlight(opts = {}) {

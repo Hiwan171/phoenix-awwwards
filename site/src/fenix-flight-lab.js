@@ -72,7 +72,7 @@ function paramsAt(uu) {
   const k = demo.timeline.at(uu), b = demo.path.at(uu);
   return {
     t: uu * demo.seconds, phase: k.beats, flap: k.flap, open: k.open, sweep: k.sweep, legs: k.legs, tail: k.tail, fly: k.fly, stretch: k.stretch,
-    bank: b.bank, pitch: b.pitch + k.pitchBias, pitchRate: b.pitchRate * 0.08, yawRate: b.yawRate * 0.08, lookYaw: -b.yawRate * 0.012, lookPitch: 0,
+    bank: b.bank, pitch: b.pitch + k.pitchBias, pitchRate: b.pitchRate * 0.08, yawRate: b.yawRate * 0.08, lookYaw: Math.max(-0.55, Math.min(0.55, b.yawRate * 0.055)), lookPitch: Math.max(-0.2, Math.min(0.2, -b.pitchRate * 0.01)), alert: k.alert,
   };
 }
 function applyU(uu) {

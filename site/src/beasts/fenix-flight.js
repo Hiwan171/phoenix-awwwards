@@ -11,6 +11,7 @@
 //   P.pitchRate, P.yawRate   rad per unit of timeline: the tail and the long feathers trail behind the turn
 //   P.lookYaw, P.lookPitch   head
 //   P.fly       0 = standing posture .. 1 = flight posture: the body lies horizontal, the neck stretches forward, the head is level
+//   P.alert     0..1  how much the bird looks around (scanning); drops when she is diving at a target. Also scales the head's life
 //   P.stretch   0..1  how far the neck and body are stretched out (glide, dive) -- the spine chain (Spine_00..) does all of it
 //
 // Every bone is posed in WORLD space: a rotation delta applied on top of its rest world rotation (so a wing beats about the BODY
@@ -25,7 +26,7 @@ const TAU = Math.PI * 2;
 
 export const FLIGHT_DEFAULTS = {
   t: 0, phase: 0, flap: 1, open: 1, sweep: 0, legs: 0, tail: 0.5, bank: 0, pitch: 0, pitchRate: 0, yawRate: 0, lookYaw: 0, lookPitch: 0,
-  fly: 0, stretch: 0.5,
+  fly: 0, stretch: 0.5, alert: 1,
 };
 
 // Poses of a fully folded wing (cl = 1). Angles are added on top of the open pose; they are what the lab's "fold" sliders edit.
@@ -56,6 +57,24 @@ const hash = (k, s) => { const x = Math.sin(k * 127.1 + s * 311.7) * 43758.5453;
 const lift = (ph) => 0.5 + 0.5 * Math.cos(TAU * ph) + 0.04 * Math.sin(2 * TAU * ph + 0.6);      // 1 top .. 0 bottom of the stroke
 const foldBeat = (ph) => Math.max(0, -Math.sin(TAU * ph));                                         // outer wing flexes on the upstroke
 
+// ── gaze: a living head. Everything is a pure function of time (saccades on a jittered grid, drifts, tremor) ──
+const HEAD_W = [0.10, 0.22, 0.42, 0.72, 1.0];                  // share of the head's orientation carried by the last five spine segments (neck base .. head)
+const G = new Float64Array(3);
+const hash1 = (k, sd) => { const x = Math.sin(k * 12.9898 + sd * 78.233) * 43758.5453; return x - Math.floor(x); };
+const sstep = (x) => { x = x < 0 ? 0 : x > 1 ? 1 : x; return x * x * (3 - 2 * x); };
+/** target of the k-th fixation (rad): yaw, pitch */
+const fix = (k) => [(hash1(k, 1) - 0.5) * 0.95, (hash1(k, 2) - 0.5) * 0.42];
+/** the gaze direction at time t: fixations of 1.4 to 3.4 s joined by quick saccades (0.2 s, eased), plus slow drift and a tremor */
+function gazeAt(t, out) {
+  const T = 2.4, k0 = Math.floor(t / T);
+  let k = k0, bk = k0 * T + 0.9 * hash1(k0, 3);
+  if (bk > t) { k = k0 - 1; bk = k * T + 0.9 * hash1(k, 3); }
+  const a = fix(k - 1), b = fix(k), s = sstep((t - bk) / 0.2);
+  out[0] = a[0] + (b[0] - a[0]) * s + 0.05 * Math.sin(TAU * (0.37 * t) + 1.1) + 0.012 * Math.sin(TAU * 6.3 * t);
+  out[1] = a[1] + (b[1] - a[1]) * s + 0.035 * Math.sin(TAU * (0.51 * t) + 0.4) + 0.008 * Math.sin(TAU * 7.7 * t + 2.0);
+  out[2] = 0.06 * Math.sin(TAU * 0.29 * t + 0.7) + 0.35 * (b[0] - a[0]) * s * (1 - s) * 2;      // head roll: a slow tilt, and a quick tilt into every saccade
+  return out;
+}
 const num = (name) => +name.replace(/\D/g, '');
 // segment angles (degrees above the horizontal, forward) of the flight posture, chest to head; the stretch flattens the neck
 const FLIGHT_THETA = [-8, -6, -3, 0, 10, 22, 30, 26, 20, 12, 10];
@@ -192,7 +211,9 @@ export function createFenixFlight(model, opts = {}) {
       }
       case 'feather': {
         const f = r.f, j = r.j, g = 0.35 + 0.65 * (j / Math.max(1, f.K - 1)), lag = 0.5 * j;
-        const flutter = 0.6 * Math.sin(TAU * (f.f1 * t / 2.5) + f.p1 - lag) + 0.4 * Math.sin(TAU * (f.f2 * t / 2.5) + f.p2 - lag);
+        // in the airflow (a glide or a dive: stretched out, wings not beating) the feather tips flutter harder and faster
+        const air = P.stretch * P.fly * (1 - 0.7 * P.flap), gA = 1 + 0.7 * air, gF = 1 + 0.3 * air;
+        const flutter = gA * (0.6 * Math.sin(TAU * (f.f1 * gF * t / 2.5) + f.p1 - lag) + 0.4 * Math.sin(TAU * (f.f2 * gF * t / 2.5) + f.p2 - lag));
         if (f.side) {                                                 // wing feather: the wake of the beat, a flutter, the fan
           const s = f.side, open = 1 - cl;
           const trail = Math.sin(TAU * (ph - f.lagBeat) - 0.45 * j);
@@ -261,16 +282,25 @@ export function createFenixFlight(model, opts = {}) {
       }
       case 'spine': {
         // each segment of the chain is posed to an ABSOLUTE direction: standing (rest) .. flight (horizontal body, stretched neck).
-        // Rz(+) lowers the front (the bird faces -x). Plus a travelling wave with the wing beat (the body rises and falls with the
-        // stroke, the neck follows a little later), a lean into the turn, a slow breathing, and the head's own look.
+        // Rz(+) lowers the front (the bird faces -x), Ry(+) turns it to the left, Rx(+) rolls it right-wing-down.
         const j = r.j, f = P.fly, st = P.stretch, neckw = j >= 4 ? (j - 3) / (K - 4) : 0;
         const target = FLIGHT_THETA[Math.min(j, FLIGHT_THETA.length - 1)] + (j >= 4 ? st * 12 * neckw : -st * 3);   // stretched: the neck reaches further forward, the body flattens
-        const stand = restTheta[j];
-        const th = (stand - target) * f;                                                    // degrees
-        const wave = (2.6 + 1.6 * neckw) * Math.sin(TAU * (P.phase - 0.07 * j)) * P.flap * f + 0.9 * Math.sin(TAU * (t / 4.2) - 0.3 * j);
-        rz(A, ((th + wave) * Math.PI) / 180);
-        ry(B, (-P.bank * 0.28 * (j / K) + (j >= K - 2 ? P.lookYaw + 0.07 * Math.sin(TAU * (t / 7) + 0.5) : 0.02 * Math.sin(TAU * (t / 6) - 0.5 * j))));
-        qmul(C, A, B); return qset(out, C[0], C[1], C[2], C[3]);
+        const th = (restTheta[j] - target) * f;                                              // degrees
+        // the head and the upper neck: a living head. hw = how much of the head's final orientation this segment carries (0 body .. 1 head)
+        const hw = j >= K - 5 ? HEAD_W[j - (K - 5)] : 0;
+        // the body wave (rises and falls with the stroke) is cancelled in the head: birds hold the head still against the flapping body
+        const wave = (2.6 + 1.6 * neckw) * Math.sin(TAU * (P.phase - 0.07 * j)) * P.flap * f * (1 - 0.88 * hw) + 0.9 * Math.sin(TAU * (t / 4.2) - 0.3 * j) * (1 - hw);
+        gazeAt(t, G);
+        const look = P.alert * (1 - 0.55 * st * f);                                           // scanning calms down when she is stretched out on a dive
+        const yaw = hw * (G[0] * look + P.lookYaw) + (hw === 0 ? -P.bank * 0.28 * (j / K) * 0 : 0);
+        const pit = hw * (G[1] * look + P.lookPitch) * 57.3 - hw * 0.8 * P.pitch * 57.3;        // plus: the head stays level against the body's pitch
+        const roll = hw * (-0.85 * P.bank + G[2] * look);                                      // and against its roll (the eyes keep the horizon)
+        // the neck S: a slow drift of the neck curve, and a small lead of the head toward the next wing stroke
+        const nk = j >= 4 ? 1.8 * Math.sin(TAU * (t / 3.7) - 0.9 * j) * (1 - hw * 0.5) + 1.1 * Math.sin(TAU * (P.phase + 0.18 * (j - 3))) * P.flap * f * hw : 0;
+        rz(A, ((th + wave + pit + nk) * Math.PI) / 180);
+        ry(B, yaw - P.bank * 0.28 * (j / K) + (j < K - 5 ? 0.02 * Math.sin(TAU * (t / 6) - 0.5 * j) : 0));
+        rx(D, roll);
+        qmul(C, A, B); qmul(E, C, D); return qset(out, E[0], E[1], E[2], E[3]);
       }
       default: return qset(out, base[0], base[1], base[2], base[3]);
     }

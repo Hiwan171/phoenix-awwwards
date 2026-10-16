@@ -42,7 +42,7 @@ export function createTimeline(keys) {
   return { keys, at(u) { const o = { u }; for (const nme of names) o[nme] = fn[nme](u); return o; } };
 }
 
-export function createPath(points, { bankGain = 2.4, maxBank = 0.55, bankSign = 1 } = {}) {
+export function createPath(points, { bankGain = 2.4, maxBank = 0.55, bankSign = -1 } = {}) {      // bankSign -1: measured, +1 raised the OUTER wing in a turn
   const curve = new THREE.CatmullRomCurve3(points.map((p) => new THREE.Vector3(...p)), false, 'centripetal');
   curve.arcLengthDivisions = 800;
   const length = curve.getLength();
