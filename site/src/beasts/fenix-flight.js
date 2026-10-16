@@ -42,7 +42,9 @@ export const FOLD = {
   fanBias: 0.0,
   tuckLegs: 1,
   rollA: 0.25, rollB: 0.42,  // radians: roll of each wing about its own axis (the sculpt's two wings are not mirror images; found in the lab)
-  correctAt: 1,         // where the wing's symmetry correction (balance + roll) is applied: 0 = shoulder (it pulled the wing root 10 cm off the body), 1 = arm
+  corrK: 1,
+  shoulderBody: 0,      // how much the SHOULDER follows the body's rotation where it is attached (the arm joint gives it back, so the rest of the
+                        // wing keeps its orientation): the root of the wing stays on the body (armpit) in the flight posture             // share of the symmetry correction applied at the shoulder (the rest at the arm): 1 = all at the shoulder
   backK: 0.7,
 };
 
@@ -230,10 +232,12 @@ export function createFenixFlight(model, opts = {}) {
         if (j === 0) {                                                // shoulder: balance, sweep back, lower (closing), beat
           ry(A, s * (0.14 * fb + P.sweep * 0.55 * (1 - cl) + fold.sweep * cl));
           rx(B, -s * (raise - bankDiff * (1 - cl)) + s * fold.down * cl);
-          // ABSOLUTE on purpose: the sculpt's wing is already spread for flight; the chest turns ~80 degrees into the flight posture and the wing
-          // must not (it would stand up). The junction is skin that stretches: the wing-body seam in rig-spine.mjs.
-          if (fold.correctAt === 0) { wingCorr(w, E); qmul(C, A, E); return qmul(out, B, C); }
-          return qmul(out, B, A);
+          // The wing's own motion is ABSOLUTE (the sculpt's wing is already spread for flight; the chest turns ~80 degrees into the flight posture
+          // and the wing must not, it would stand up). Only the SHOULDER bone follows the body (shoulderBody), and the arm gives it back.
+          wingCorr(w, E, fold.corrK); qmul(C, A, E); qmul(w.Wsh ?? (w.Wsh = new Float64Array(4)), B, C);    // the wing's own motion at the shoulder
+          if (fold.shoulderBody <= 0) return qset(out, w.Wsh[0], w.Wsh[1], w.Wsh[2], w.Wsh[3]);
+          slerpId(D, spineAt(r.bi, r, E), fold.shoulderBody);                    // the body's rotation at the shoulder (share)
+          return qmul(out, D, w.Wsh);
         }
         // arm, forearm, hand, second branch: each adds its share of the beat, the sweep and (closing) the Z-fold
         const share = [[0, 0], [0.10, 0.18], [0.16, 0.30], [0.18, 0.32], [0.18, 0.32]][j];
@@ -242,7 +246,11 @@ export function createFenixFlight(model, opts = {}) {
         const ld = P.load * (0.5 + 0.5 * (1 - cl));                    // the wing carries the load: the tips bend up in a pull-up, float in a push-over
         rx(A, -s * share[0] * raise + wave - s * ld * [0, 0.10, 0.18, 0.26, 0.26][j]); ry(B, s * (share[1] * fb + zf * cl + 0.12 * P.sweep * (1 - cl)));
         qmul(C, A, B);
-        if (j === 1 && fold.correctAt === 1) { wingCorr(w, E); qmul(D, E, C); return qmul(out, base, D); }     // the symmetry correction pivots at the ARM: the root stays on the body
+        if (j === 1) {                                                   // the arm gives the body's share back: the outer wing keeps the wing's own orientation
+          const b1 = fold.shoulderBody > 0 ? w.Wsh : base;
+          if (fold.corrK < 1) { wingCorrRest(w, E); qmul(D, E, C); return qmul(out, b1, D); }
+          return qmul(out, b1, C);
+        }
         return qmul(out, base, C);
       }
       case 'feather': {
@@ -354,7 +362,12 @@ export function createFenixFlight(model, opts = {}) {
     return qnorm(out);
   }
   /** the wing's symmetry correction (balance toward the mean pose, then its own roll) into o */
-  function wingCorr(w, o) { const roll = w.side === wings[1].side ? fold.rollB : fold.rollA; qaxis(tmp3, w.axis[0], w.axis[1], w.axis[2], roll); return qmul(o, tmp3, w.bal); }
+  const corrFull = new Float64Array(4), corrPart = new Float64Array(4), corrInv = new Float64Array(4);
+  function slerpId(o, q, k) { const a = 2 * Math.acos(Math.min(1, Math.abs(q[3]))), sg = q[3] < 0 ? -1 : 1, si = Math.sin(a / 2); if (a < 1e-6 || !si) return qset(o, 0, 0, 0, 1); return qaxis(o, (sg * q[0]) / si, (sg * q[1]) / si, (sg * q[2]) / si, a * k); }
+  /** the wing's symmetry correction (balance toward the mean pose, then its own roll), k = the share of it (shoulder part) */
+  function wingCorr(w, o, k = 1) { const roll = w.side === wings[1].side ? fold.rollB : fold.rollA; qaxis(tmp3, w.axis[0], w.axis[1], w.axis[2], roll); qmul(corrFull, tmp3, w.bal); return k >= 1 ? qset(o, corrFull[0], corrFull[1], corrFull[2], corrFull[3]) : slerpId(o, corrFull, k); }
+  /** what is left of the correction after the shoulder's share: inv(part) * full */
+  function wingCorrRest(w, o) { wingCorr(w, corrPart, fold.corrK); qconj(corrInv, corrPart); return qmul(o, corrFull, corrInv); }
   const baseTmp = new Float64Array(4), outQ = new Float64Array(4), pqA = new Float64Array(4), rwA = new Float64Array(4), rlA = new Float64Array(4);
   const ld = (o, arr, i) => { o[0] = arr[i * 4]; o[1] = arr[i * 4 + 1]; o[2] = arr[i * 4 + 2]; o[3] = arr[i * 4 + 3]; return o; };
   function pose(P) {

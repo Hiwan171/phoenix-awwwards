@@ -147,15 +147,16 @@ for (let v = 0; v < nV; v++) {
 // and 25-40 cm in flight (measured, the BODY does not move: the wing does). Every wing vertex that lies within SEAM_R of the body's
 // surface takes the weights of the nearest body vertex, with a share that falls from 1 (touching) to 0 (SEAM_R away): the root is
 // glued to the body, the rest of the wing is free.
-if (+(process.env.SEAM_R ?? 0.2) > 0) {
-  const SEAM_R = +(process.env.SEAM_R ?? 0.2);                     // the legs are NOT part of the seam (they tuck and would drag the wing)
+if (+(process.env.SEAM_R ?? 0.18) > 0) {
+  const SEAM_R = +(process.env.SEAM_R ?? 0.18);                     // the legs are NOT part of the seam (they tuck and would drag the wing)
   const spineIdx = new Set(Array.from({ length: K }, (_, j) => nOld + j));
   const bodyJ = new Set([...spineIdx, ...['Bone_000','Bone_001'].map((nm) => names.indexOf(nm)).filter((i) => i >= 0)]);
   const wingJ = (j) => j < nOld && wingJoint[j];
   const massOf = (v, pred) => { let m = 0; for (let k = 0; k < 4; k++) if (pred(nJ[v*4+k])) m += nW[v*4+k]; return m; };
   const cell = SEAM_R, grid = new Map(), key = (x, y, z) => `${x},${y},${z}`;
   for (let v = 0; v < nV; v++) if (massOf(v, (j) => bodyJ.has(j)) >= 0.7) { const k = key(Math.floor(pos[v*3]/cell), Math.floor(pos[v*3+1]/cell), Math.floor(pos[v*3+2]/cell)); (grid.get(k) ?? grid.set(k, []).get(k)).push(v); }
-  const SHOULDER_R0 = +(process.env.SHOULDER_R0 ?? 9), SHOULDER_R1 = +(process.env.SHOULDER_R1 ?? 10);
+  const SEAM_MAX = +(process.env.SEAM_MAX ?? 0.6);                  // the largest share of the body a wing vertex takes (1 = glued)
+  const SHOULDER_R0 = +(process.env.SHOULDER_R0 ?? 0.2), SHOULDER_R1 = +(process.env.SHOULDER_R1 ?? 0.45);
   const shoulders = ['Bone_036', 'Bone_039'].map((nm) => byName.get(nm).getWorldTranslation());
   const snapJ = new Uint16Array(nJ), snapW = new Float32Array(nW);         // read the body weights BEFORE any change
   let seamed = 0;
@@ -168,7 +169,7 @@ if (+(process.env.SEAM_R ?? 0.2) > 0) {
     const ds = Math.min(...shoulders.map((q) => Math.hypot(pos[v*3]-q[0], pos[v*3+1]-q[1], pos[v*3+2]-q[2])));
     const rs = Math.min(1, Math.max(0, (ds - SHOULDER_R0) / (SHOULDER_R1 - SHOULDER_R0))), near = 1 - rs * rs * (3 - 2 * rs);
     if (near <= 0) continue;
-    const t = bd / SEAM_R, f = (1 - t * t * (3 - 2 * t)) * near;
+    const t = bd / SEAM_R, f = (1 - t * t * (3 - 2 * t)) * near * SEAM_MAX;
     const acc = new Map();
     for (let k = 0; k < 4; k++) { if (nW[v*4+k] > 0) acc.set(nJ[v*4+k], (acc.get(nJ[v*4+k]) ?? 0) + nW[v*4+k] * (1 - f)); if (snapW[best*4+k] > 0) acc.set(snapJ[best*4+k], (acc.get(snapJ[best*4+k]) ?? 0) + snapW[best*4+k] * f); }
     const top = [...acc.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4), sum = top.reduce((s2, e) => s2 + e[1], 0);

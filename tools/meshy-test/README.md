@@ -235,3 +235,17 @@ even standing; the WING moves (40 cm), the body does not. Two causes:
    pelvis, not the legs), with a share falling from 1 (touching) to 0. Gap in flight: median 25-30 cm -> 4-5 cm.
 Price: stretched edges 0.20 % -> 0.26-0.33 % in flight, in the seam (that is the armpit skin stretching). Limiting the seam to the
 shoulder area (SHOULDER_R0/R1) brought the gaps back (other wing parts lie against the body), so it is off.
+
+### Correction (16/10/2026, recording `2026-10-16 15-18-11`): the seam stiffened the wing and lost the symmetry
+The user saw: the lower part of the wing stiff while the upper part beat, the shoulder locked, big and smeared, the symmetry lost.
+Causes (both mine): the wide seam (SEAM_R 0.2, share 1, any wing vertex near the body) glued the wing's LOWER LAYER (it lies against the
+body at rest) and stretched the shoulder skin; moving the symmetry correction to the arm left the two shoulders as sculpted (wing B
+higher and swept back), so the shoulders no longer matched. Now:
+- the correction is back at the shoulder (`fold.corrK = 1`; `corrK < 1` splits it between shoulder and arm);
+- the seam is SOFT and only at the root: SEAM_R 0.18, SEAM_MAX 0.6 (a wing vertex takes at most 60 % of the body), and only within
+  0.2-0.45 of the shoulder joints (SHOULDER_R0 / R1);
+- tried and rejected: the shoulder bone following the body's rotation with the arm giving it back (`fold.shoulderBody`): the median gap
+  improved but p90 got worse (32 -> 48 cm), off.
+Stretched edges: 0.20-0.24 % (none) / 0.26-0.30 % (this soft seam) / 0.26-0.33 % (the wide seam). Wing x wing and tail x body unchanged.
+Lesson: a metric that says "gap closed" (median of contact pairs) is not the user's eye: gluing the lower wing layer closed the gap and
+froze the wing. Always render the result at the user's camera distance before declaring a fix.
