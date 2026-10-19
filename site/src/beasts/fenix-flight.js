@@ -21,6 +21,7 @@
 //   P.shake     0..1  feathers ruffled and shaken out (waking up): a quick shiver of the body and the plumage; P.shakePh its phase
 //               in cycles (from the timeline, like the wing beat: it plays as the scroll passes and holds when it stops)
 //   P.hug       0..1  folded wings drawn in against the body (seen from the front the plain fold holds them out like arms)
+//   P.ground    0..1  standing on something: the legs and the pelvis (which carries them) hold STILL, no sway; the life is above them
 //   P.tailLift  rad   the tail raised (spread over its root chains): the scene uses it to keep the plumes off the ground
 //   P.crouch    0..1  standing crouch: the legs flex with the feet kept flat where they stand, the body comes down (roosting)
 //
@@ -36,7 +37,7 @@ const TAU = Math.PI * 2;
 
 export const FLIGHT_DEFAULTS = {
   t: 0, phase: 0, flap: 1, open: 1, sweep: 0, legs: 0, tail: 0.5, bank: 0, pitch: 0, pitchRate: 0, yawRate: 0, lookYaw: 0, lookPitch: 0,
-  fly: 0, stretch: 0.5, alert: 1, rate: 0, load: 0, sleep: 0, wind: 0, windX: 0, windY: 0, windZ: 1, shake: 0, shakePh: 0, hug: 0, crouch: 0, tailLift: 0,
+  fly: 0, stretch: 0.5, alert: 1, rate: 0, load: 0, sleep: 0, wind: 0, windX: 0, windY: 0, windZ: 1, shake: 0, shakePh: 0, hug: 0, crouch: 0, tailLift: 0, ground: 0,
 };
 
 // Poses of a fully folded wing (cl = 1). Angles are added on top of the open pose; they are what the lab's "fold" sliders edit.
@@ -387,12 +388,12 @@ export function createFenixFlight(model, opts = {}) {
         const a = L >= 0 ? L * back * fold.tuckLegs : L * fwd * 1.0;
         // life: the legs are never held. Each joint trails the wing beat a little more than the one above (a wave down the leg),
         // dangles in the airflow (pitch), splays and swings with the turn, and flexes slowly on its own
-        const calm = 1 - Math.abs(L) * 0.5;
+        const calm = (1 - Math.abs(L) * 0.5) * (1 - P.ground);          // planted: firm, no sway
         const wv = (0.10 + 0.05 * j) * Math.sin(TAU * (P.phase - 0.13 * (j + 1) - (r.li ? 0.08 : 0))) * P.flap * (0.4 + 0.6 * f);
         const sway = (0.07 * Math.sin(TAU * (0.4 * t - 0.15 * j + (r.li ? 0.1 : 0))) + 0.04 * Math.sin(TAU * (0.9 * t - 0.2 * j))) * calm - 0.18 * P.pitchRate * (j + 1) / 5;
-        rz(A, a + sway * (1 - 0.8 * P.crouch) + wv + clampT(P.load * 0.25, 0.2) / 5 + P.crouch * CROUCH[j]);
+        rz(A, a + sway + wv * (1 - P.ground) + clampT(P.load * 0.25, 0.2) / 5 + P.crouch * CROUCH[j]);
         ry(B, (0.05 + 0.03 * j) * Math.sin(TAU * (0.55 * t - 0.17 * j + (r.li ? 0.3 : 0))) * calm + (r.side) * (0.05 + 0.04 * j) * f * L - P.yawRate * 0.10 * (j + 1) / 5 * (r.side));
-        rx(C, (r.side) * (0.02 + 0.015 * j) * Math.sin(TAU * (0.7 * t - 0.2 * j)));
+        rx(C, (r.side) * (0.02 + 0.015 * j) * Math.sin(TAU * (0.7 * t - 0.2 * j)) * (1 - P.ground));
         qmul(D, A, B); qmul(E, D, C); return qmul(out, base, E);
       }
       case 'crest': {
@@ -415,7 +416,9 @@ export function createFenixFlight(model, opts = {}) {
         // the head and the upper neck: a living head. hw = how much of the head's final orientation this segment carries (0 body .. 1 head)
         const hw = j >= K - 5 ? HEAD_W[j - (K - 5)] : 0;
         // the body wave (rises and falls with the stroke) is cancelled in the head: birds hold the head still against the flapping body
-        const wave = (2.6 + 1.6 * neckw) * Math.sin(TAU * (P.phase - 0.07 * j)) * P.flap * f * (1 - 0.88 * hw) + 0.9 * Math.sin(TAU * (t / 4.2) - 0.3 * j) * (1 - hw);
+        // on the ground the PELVIS (j = 0, it carries the legs) holds still: its sway, breath and gusts would make planted feet dance
+        const amb = j === 0 ? 1 - P.ground : 1;
+        const wave = (2.6 + 1.6 * neckw) * Math.sin(TAU * (P.phase - 0.07 * j)) * P.flap * f * (1 - 0.88 * hw) + 0.9 * Math.sin(TAU * (t / 4.2) - 0.3 * j) * (1 - hw) * amb;
         gazeAt(t, G);
         const sl = P.sleep;
         const look = P.alert * (1 - 0.55 * st * f) * (1 - sl);                                // scanning calms down when she is stretched out on a dive; none asleep
@@ -426,17 +429,17 @@ export function createFenixFlight(model, opts = {}) {
         const nk = j >= 4 ? -P.load * 6 * neckw * (1 - hw) + (1 - hw) * 0 + 0 : 0;
         const nk2 = j >= 4 ? 1.8 * Math.sin(TAU * (t / 3.7) - 0.9 * j) * (1 - hw * 0.5) + 1.1 * Math.sin(TAU * (P.phase + 0.18 * (j - 3))) * P.flap * f * hw : 0;
         // asleep: the curl of the neck; breathing (deeper asleep); the wind buffets the neck and head a little (sideways, with the gusts)
-        const br = breathAt(t - 0.12 * j) * (1.1 + 1.6 * sl) * BREATH_W[j] * (1 - f);
-        const gw = P.wind > 0 ? (gustAt(t - 0.25, 0) - 0.55) * P.wind * (1 - f) * (0.4 + 0.6 * neckw) : 0;
-        const shv = P.shake * Math.sin(TAU * P.shakePh - 0.6 * j) * (j < 6 ? 0.07 : 0.03) * (1 - f);
+        const br = breathAt(t - 0.12 * j) * (1.1 + 1.6 * sl) * BREATH_W[j] * (1 - f) * amb;
+        const gw = P.wind > 0 ? (gustAt(t - 0.25, 0) - 0.55) * P.wind * (1 - f) * (0.4 + 0.6 * neckw) * amb : 0;
+        const shv = P.shake * Math.sin(TAU * P.shakePh - 0.6 * j) * (j < 6 ? 0.07 : 0.03) * (1 - f) * amb;
         rz(A, ((th + wave * (1 - 0.6 * sl) + pit + nk + nk2 * (1 - 0.8 * sl) + SLEEP_THETA[j] * sl + br) * Math.PI) / 180);
-        ry(B, yaw - P.bank * 0.28 * (j / K) + (j < K - 5 ? 0.02 * Math.sin(TAU * (t / 6) - 0.5 * j) : 0) + gw * 0.035 * P.windZ);
+        ry(B, yaw - P.bank * 0.28 * (j / K) + (j < K - 5 ? 0.02 * Math.sin(TAU * (t / 6) - 0.5 * j) * amb : 0) + gw * 0.035 * P.windZ);
         rx(D, roll + gw * 0.03 * Math.sign(P.windZ || 1) + shv);
         if (j === 0) {                                                                       // the pelvis end: it also rides the wing beat a touch after the chest, leans into the turn, breathes
           rz(tmp3, ((3.4 + 1.6 * st) * Math.sin(TAU * (P.phase + 0.10)) * P.flap * f * Math.PI) / 180);
           qmul(E, tmp3, A); qset(A, E[0], E[1], E[2], E[3]);
           ry(E, 0.05 * Math.sin(TAU * (P.phase + 0.35)) * P.flap * f - P.yawRate * 0.12); qmul(tmp3, E, B); qset(B, tmp3[0], tmp3[1], tmp3[2], tmp3[3]);
-          rx(D, -P.bank * 0.22 + 0.02 * Math.sin(TAU * (t / 5.3)));
+          rx(D, -P.bank * 0.22 + 0.02 * Math.sin(TAU * (t / 5.3)) * amb);
         }
         qmul(C, B, A); qmul(E, C, D); return qset(out, E[0], E[1], E[2], E[3]);        // yaw (outer) * pitch * roll (inner): a turned head keeps its elevation
       }

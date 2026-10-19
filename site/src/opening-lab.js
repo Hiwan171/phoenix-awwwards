@@ -245,8 +245,8 @@ const WIND_GAIN = +(Q.get('wind') ?? 1);                 // ?wind=0 no wind on t
 const SECONDS = 40;                                        // the clock of the small life-motions over the whole scroll
 // camera, in the bird's heading frame (f forward, r right, up), keyed on u; tf/tu = where it looks (ahead of / above the bird)
 const CAM = createTimeline([
-  { u: 0.00, cf: 2.4, cr: 0.0,  cu: -0.12, tf: 0.0, tu: 0.10, fov: 30 },    // FRONT, centred, at chest height looking almost level: she sleeps on the peak against the sky (a slow push-in)
-  { u: 0.05, cf: 2.05, cr: 0.0, cu: -0.12, tf: 0.0, tu: 0.10, fov: 30 },
+  { u: 0.00, cf: 4.5, cr: 0.0,  cu: -0.50, tf: 0.0, tu: 0.12, fov: 30 },    // FRONT, centred, from a little below and further out: the whole peak, she sleeps on it against the sky (a slow push-in)
+  { u: 0.05, cf: 3.95, cr: 0.0, cu: -0.46, tf: 0.0, tu: 0.12, fov: 30 },
   { u: 0.085, cf: 2.6, cr: 0.35, cu: -0.20, tf: 0.0, tu: 0.14, fov: 31 },   // she wakes (still almost frontal)
   { u: 0.11, cf: 2.1, cr: 1.8,  cu: -0.32, tf: 0.0, tu: 0.20, fov: 34 },    // the camera starts round to her side
   { u: 0.13, cf: 0.6, cr: 3.0,  cu: -0.10, tf: 0.6, tu: 0.20, fov: 36 },    // side, as she crouches
@@ -409,7 +409,7 @@ function place(u, usePlants = true, noWind = false) {
   const lf = LIFE.at(u);
   life = lf;
   const P = {
-    sleep: lf.sleep, crouch: lf.sleep, shake: lf.shake, tailLift: tailLiftAt(u), shakePh: u * 300, wind: noWind ? 0 : lf.wind * WIND_GAIN, hug: lf.hug, windX: windM.x, windY: windM.y, windZ: windM.z,
+    ground: k.ground, sleep: lf.sleep, crouch: lf.sleep, shake: lf.shake, tailLift: tailLiftAt(u), shakePh: u * 300, wind: noWind ? 0 : lf.wind * WIND_GAIN, hug: lf.hug, windX: windM.x, windY: windM.y, windZ: windM.z,
     t: lifeT, phase: k.beats, flap: k.flap, open: k.open, sweep: k.sweep, legs: k.legs, tail: k.tail, fly: k.fly, stretch: k.stretch, alert: k.alert,
     bank: b.bank * (1 - k.ground), pitch: b.pitch * (1 - k.ground) + k.pitchBias, pitchRate: b.pitchRate * 0.08 * (1 - k.ground), yawRate: b.yawRate * 0.08 * (1 - k.ground),
     lookYaw: Math.max(-0.5, Math.min(0.5, b.yawRate * 0.04)) * (1 - k.ground), lookPitch: 0, load: Math.max(-1, Math.min(1, b.pitchRate * 0.1)) * (1 - k.ground),
