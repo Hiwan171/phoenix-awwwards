@@ -136,6 +136,29 @@ sozinho.** Estado: **dragão e fênix prontos**; tigre e tartaruga aguardam. Tud
   (no referencial de direção da ave, nunca dentro da montanha), sombra que segue a ave. 60 fps (web e lite). `?u=`, `?ui=0`,
   Espaço = auto-play, C = câmera livre, H = esconde a UI. QA: `__op.setU(u)`.
 
+- **Visual de fogo da fênix (19/10/2026), na cena de abertura.** Antes: a cor crua do Meshy (tijolo empoeirado; luminância linear
+  da textura: 5 % < 0,020, mediana 0,065). Agora, em camadas:
+  - `site/src/beasts/fenix-look.js` (`applyFenixLook(mesh)`, encadeado com as pálpebras): a cor de base é **regradada pela própria
+    luminância numa paleta de fogo** (preto-brasa → carmim → escarlate → laranja → ouro, pontas das penas mais quentes, pernas
+    esverdeadas → bronze, olhos preservados); o albedo fica perto do brilho original (`albedo 0.5`) e **o brilho vem da emissão**:
+    brasas só nas frestas mais escuras, faixas de calor correndo pelas cadeias de penas até a ponta (`aTip`), pontas quentes,
+    rim de Fresnel, contraluz do sol atravessando as penas (só quando a câmera olha contra o sol) e olhos de brasa (fecham com
+    o piscar). Opcional: dissolve das pontas (`burn`, desligado).
+  - `site/src/beasts/fenix-embers.js`: faíscas que nascem nas pontas das penas (skinning na CPU só do vértice que renasce) e
+    **ficam no ar onde ela passou**: em voo viram um rastro, pousada sobem dela. Relógio de parede (ela arde mesmo com o scroll parado).
+  - Pós-processamento `hero-post.js` (bloom + aura de chamas da silhueta, ACES no passe final). O céu passa a ser escrito em luz
+    linear. Novidades no `hero-post`: `params.samples` (MSAA da cena), `setSamples`, `setScale` (resolução dinâmica) e
+    `params.occluders` + `LAYER_OCCLUDER` (o terreno entra só na profundidade da máscara, senão a aura desenha a cauda escondida
+    atrás da montanha como um contorno pontilhado). `rim` da aura = 0 (em meia resolução ele pontilha os fios finos; o material
+    já tem o seu rim).
+  - Intensidade por cena (`HEAT`, keyed em u): **pousada ela só arde, pega fogo no salto**, chamas plenas em voo, um surto na
+    freada, acalma no pouso. Cada batida para baixo aviva o fogo.
+  - **Custo (Intel UHD, 1280×720, GPU ms por timer query, intercalado):** cru 6–11; visual completo sem MSAA 10–14; MSAA 2 ~17;
+    MSAA 4 ~21 (MSAA num alvo HalfFloat é o vilão). Governador: começa em MSAA 4 e desce (4 → 2 → 0 → escala 0,85 → 0,72)
+    enquanto >10 % dos quadros passam de 18 ms. Nesta máquina assenta em MSAA 0: 60 fps, 0 quadros perdidos, igual ao cru.
+  - Flags: `?look=0` (cru, A/B), `?aura=0`, `?bloom=0`, `?msaa=N` (fixa, sem governador), `?scale=`, `?steps=`, `?embers=N`,
+    `?bs=`/`?bt=` (força/limiar do bloom), `?sky=` (ganho do céu). QA: `__op.look.set({...})`, `__op.render(t)`, `__op.tier`.
+
 ### Performance — o que medimos (Intel UHD 620 / i5-10210U, 1080p; vale para as novas feras)
 - **Resultado:** o hero com a fênix foi de **19,5 → 38,8 fps** (A/B intercalado, vsync ligado) com visual equivalente
   (diff de pixels: corpo PSNR 61–71 dB; chamas estatisticamente iguais), e o governador leva a ~55–60 fps nos tiers altos.

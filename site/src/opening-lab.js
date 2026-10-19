@@ -11,10 +11,15 @@ import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { createFenixFlight } from './beasts/fenix-flight.js';
 import { createPath, createTimeline } from './beasts/flight-path.js';
 import { applyEyes, blinkAt } from './beasts/fenix-eyes.js';
+import { applyFenixLook } from './beasts/fenix-look.js';
+import { createEmbers } from './beasts/fenix-embers.js';
+import { createHeroPost, LAYER_SILHOUETTE, LAYER_OCCLUDER } from './hero-post.js';
 
 const Q = new URLSearchParams(location.search);
 const $ = (id) => document.getElementById(id);
 const TAU = Math.PI * 2;
+// ?look=0: the raw model, no post (A/B);  ?aura=0 no silhouette flames;  ?bloom=0
+const LOOK = Q.get('look') !== '0', SKY_GAIN = +(Q.get('sky') ?? 0.9);
 
 // ───────────── renderer, light ─────────────
 const renderer = new THREE.WebGLRenderer({ canvas: $('gl'), antialias: true, powerPreference: 'high-performance' });
@@ -32,8 +37,11 @@ Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4 });
 scene.add(sun, sun.target);
 scene.add(new THREE.HemisphereLight(0xffb48a, 0x2a1820, 0.9));
 const camera = new THREE.PerspectiveCamera(38, 1, 0.05, 600);
-function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+let post = null, embers = null; const BUF = new THREE.Vector2();
+function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); post?.setSize(); }
 addEventListener('resize', resize); resize();
+if (LOOK) post = createHeroPost({ renderer, scene, camera, aura: Q.get('aura') !== '0', bloom: Q.get('bloom') !== '0', params: {
+  samples: +(Q.get('msaa') ?? 4), scale: +(Q.get('scale') ?? 1), intensity: 0.8, height: 0.2, rim: 0, opaque: 0.4, steps: +(Q.get('steps') ?? 12), occluders: true, bloomStrength: +(Q.get('bs') ?? 0.5), bloomRadius: 0.55, bloomThreshold: +(Q.get('bt') ?? 1.8) } });
 
 // ───────────── sky: a gradient dome with the setting sun ─────────────
 {
@@ -41,13 +49,22 @@ addEventListener('resize', resize); resize();
     side: THREE.BackSide, depthWrite: false, fog: false,
     uniforms: { uH: { value: HORIZON }, uZ: { value: ZENITH }, uSun: { value: SUN_DIR } },
     vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    defines: { LOOK: LOOK ? 1 : 0, SKY_GAIN: SKY_GAIN.toFixed(3) },
     fragmentShader: `uniform vec3 uH, uZ, uSun; varying vec3 vD;
       void main(){
         float h = clamp(vD.y, -0.2, 1.0);
         vec3 c = mix(uH, uZ, pow(max(h, 0.0), 0.55));
         c = mix(c, uH * 0.55, smoothstep(0.0, -0.2, h));                 // below the horizon: the haze of the valleys
         float s = max(dot(normalize(vD), uSun), 0.0);
-        c += vec3(1.0, 0.62, 0.32) * (pow(s, 6.0) * 0.55 + pow(s, 80.0) * 1.2) + vec3(1.0, 0.9, 0.7) * smoothstep(0.9993, 0.9997, s) * 3.0;
+        c += vec3(1.0, 0.62, 0.32) * (pow(s, 6.0) * 0.55 + pow(s, 80.0) * 1.2);
+        float disc = smoothstep(0.9993, 0.9997, s);
+        #if LOOK
+        // with the post chain the sky is written in LINEAR light (ACES + sRGB come at the end): the gradient is decoded from the
+        // display values it was tuned in; only the sun's disc stays HDR (it feeds the bloom)
+        c = pow(min(c, vec3(1.0)), vec3(2.2)) * SKY_GAIN + vec3(1.0, 0.85, 0.6) * disc * 6.0;
+        #else
+        c += vec3(1.0, 0.9, 0.7) * disc * 3.0;
+        #endif
         gl_FragColor = vec4(c, 1.0);
       }`,
   });
@@ -100,7 +117,7 @@ function terrainMesh(size, seg, cx, cz, lowerInPatches) {
   }
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }));
-  mesh.receiveShadow = true; scene.add(mesh); return mesh;
+  mesh.receiveShadow = true; mesh.layers.enable(LAYER_OCCLUDER); scene.add(mesh); return mesh;
 }
 terrainMesh(180, 260, -6, -20, true);
 for (const q of PATCHES) terrainMesh(q.size, q.seg, q.x, q.z, false);
@@ -171,6 +188,19 @@ const holder = new THREE.Group(); holder.rotation.y = -Math.PI / 2; holder.scale
 const bird = new THREE.Group(); bird.add(holder); scene.add(bird);
 const flight = createFenixFlight(model);
 const eyes = applyEyes(skinned.material);
+const look = LOOK ? applyFenixLook(skinned) : null;
+if (LOOK) {
+  skinned.material.metalness = 0.15; skinned.material.envMapIntensity = 0.35;
+  model.traverse((o) => { if (o.isMesh || o.isSkinnedMesh) o.layers.enable(LAYER_SILHOUETTE); });
+  embers = createEmbers({ mesh: skinned, count: +(Q.get('embers') ?? 320) }); scene.add(embers.points);
+}
+// how hot she burns along the scene (u): calm on the peak, a burst at the leap, full in flight, a flare when she brakes
+const HEAT = createTimeline([
+  { u: 0.00, h: 0.55 }, { u: 0.10, h: 0.65 }, { u: 0.13, h: 0.95 }, { u: 0.16, h: 1.45 }, { u: 0.24, h: 1.15 }, { u: 0.40, h: 1.0 },
+  { u: 0.60, h: 0.95 }, { u: 0.80, h: 1.05 }, { u: 0.87, h: 1.35 }, { u: 0.93, h: 0.95 }, { u: 1.00, h: 0.6 },
+]);
+const EMBER_RATE = (h) => Math.min(1, Math.max(0.15, (h - 0.3) * 1.1));
+let heatNow = 1;
 const feet = ['Bone_002', 'Bone_009'].map((nm) => flight.bones[flight.byName.get(nm)]);
 const FOOT_MARGIN = 0.012, V = new THREE.Vector3();
 
@@ -193,6 +223,7 @@ function place(u, usePlants = true) {
   };
   flight.pose(P);
   eyes.set(blinkAt(P.t));
+  heatNow = HEAT.at(u).h * (1 + 0.12 * k.flap * Math.max(0, Math.sin(k.beats * TAU)));   // each downstroke fans the fire
   if (k.ground > 0.001) {                                              // feet on the terrain
     bird.updateMatrixWorld(true);
     // the lowest foot (relative to the ground under it) touches; the other may be a little above
@@ -244,7 +275,38 @@ addEventListener('keydown', (e) => {
 addEventListener('wheel', () => { if (autoplay) setPlay(false); }, { passive: true });     // scrolling by hand takes over
 if (Q.has('u')) requestAnimationFrame(() => lenis.scrollTo(u * lenis.limit, { immediate: true }));
 if (Q.get('play') === '1') requestAnimationFrame(() => setPlay(true));
+function draw(time) {
+  if (!post) { renderer.render(scene, camera); return; }
+  look.update({ time, heat: heatNow, camera, sunDir: SUN_DIR, blink: blinkAt(u * SECONDS) });
+  embers.update(time, EMBER_RATE(heatNow));
+  embers.setPixelScale(renderer.getDrawingBufferSize(BUF).y, camera.fov);
+  // the flames: almost none while she rests (she smoulders), they catch when she leaps and settle again on the ledge
+  post.aura.uniforms.uIntensity.value = 0.85 * Math.min(1.3, Math.max(0, (heatNow - 0.5) / 0.55));
+  post.aura.uniforms.uHeight.value = 0.07 + 0.11 * Math.min(1.4, heatNow);           // calm licks when perched, tall in flight
+  post.render(time);
+}
+// quality governor: start at the best tier and step down while frames run long (a frame over 18 ms with vsync = a missed one).
+// Tiers: MSAA 4 -> 2 -> 0, then a lower render scale (dynamic resolution) and fewer aura steps. Measured on an Intel UHD 620 at
+// 1280x720 (GPU ms, timer queries, interleaved): raw 6-11, full look no MSAA 10-14, MSAA 2 ~17, MSAA 4 ~21; with the browser's own
+// compositing on the same GPU, frames start to miss above ~12 ms. ?msaa= pins the MSAA (no governor), ?scale= the render scale.
+const TIERS = [{ msaa: 4, steps: 12, scale: 1 }, { msaa: 2, steps: 12, scale: 1 }, { msaa: 0, steps: 12, scale: 1 },
+               { msaa: 0, steps: 10, scale: 0.85 }, { msaa: 0, steps: 8, scale: 0.72 }];
+let tier = 0, govFrames = [], govSkip = 30, govClean = 0, govOn = LOOK && !Q.has('msaa');
+function governor(dt) {
+  if (!govOn || document.hidden) return;
+  if (govSkip > 0) { govSkip--; return; }
+  govFrames.push(dt);
+  if (govFrames.length < 90) return;
+  govFrames.sort((a, b) => a - b);
+  const slow = govFrames.filter((d) => d > 18).length / govFrames.length;
+  govFrames = [];
+  if (slow > 0.1 && tier < TIERS.length - 1) {
+    tier++; post.setSamples(TIERS[tier].msaa); post.aura.uniforms.uSteps.value = TIERS[tier].steps; post.setScale(TIERS[tier].scale); govSkip = 30;
+    console.info('[opening] quality tier', tier, TIERS[tier]);
+  } else if (slow > 0.1 || ++govClean >= 3) govOn = false;      // at the floor, or settled after three clean windows
+}
 function frame(now) {
+  governor(now - last);
   last = now;
   lenis.raf(now);
   if (!hold) {
@@ -257,12 +319,13 @@ function frame(now) {
     $('bar').style.width = (u * 100).toFixed(2) + '%';
     $('hud').textContent = `u ${u.toFixed(3)}   ${u < 0.13 ? 'perched' : u < 0.16 ? 'leap' : u < 0.81 ? 'flight' : u < 0.905 ? 'landing' : 'on the ledge'}${autoplay ? '   ' + ((u - playU0) * duration + (playU0 * duration)).toFixed(1) + ' / ' + duration + ' s' : ''}`;
   }
-  renderer.render(scene, camera);
+  draw(now / 1000);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
 // QA hooks
 window.__op = { THREE, scene, camera, bird, flight, path, timeline, heightAt, PATH, skinned,
-  setU(uu) { hold = true; u = uu; const r = place(uu); placeCamera(uu, r.b); shadowFollow(); renderer.render(scene, camera); return r; },
-  ready: true };
+  setU(uu, time = performance.now() / 1000) { hold = true; u = uu; const r = place(uu); placeCamera(uu, r.b); shadowFollow(); draw(time); return r; },
+  render: (time = performance.now() / 1000) => draw(time), renderer, get post() { return post; }, get look() { return look; }, get embers() { return embers; },
+  get tier() { return tier; }, ready: true };

@@ -20,6 +20,8 @@ import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { QUAD_VERT, FLAME_FRAG, makeNoiseTexture } from './flame-aura.js';
 
 export const LAYER_SILHOUETTE = 1;      // the bird alone: the aura mask
+export const LAYER_OCCLUDER = 2;        // scenery in front of the bird (a mountain): drawn into the mask's DEPTH only, so the parts of
+                                        // the bird it hides neither burn nor get a rim (enable this layer on terrain meshes)
 
 // half-res: soften the flame field and add the hot rim on the silhouette. Output: rgb = fire to ADD, a = cover amount.
 const AURA_FINAL_FRAG = /* glsl */`
@@ -114,7 +116,7 @@ const TONE_DEFINE = {
 /**
  * @param aura   run the flame aura (silhouette flames + hot rim)
  * @param bloom  run the bloom
- * @param params { intensity, rim, height, opaque, steps, density, warp, bloomStrength, bloomRadius, bloomThreshold }
+ * @param params { intensity, rim, height, opaque, steps, density, warp, bloomStrength, bloomRadius, bloomThreshold, samples, occluders }
  */
 export function createHeroPost({ renderer, scene, camera, aura = true, bloom = true, params = {} }) {
   const HALF = (n) => Math.max(2, Math.round(n / 2));
@@ -122,7 +124,7 @@ export function createHeroPost({ renderer, scene, camera, aura = true, bloom = t
   const size = new THREE.Vector2();
 
   // ───────── targets (sizes are set by setSize) ─────────
-  const sceneRT = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, depthBuffer: true, stencilBuffer: false });
+  const sceneRT = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, depthBuffer: true, stencilBuffer: false, samples: params.samples ?? 0 });   // samples: MSAA of the scene (the canvas' antialias does not reach a target)
   const maskRT = new THREE.WebGLRenderTarget(2, 2, { type: THREE.UnsignedByteType, depthBuffer: true });
   const flameRT = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, depthBuffer: false });
   const auraRT = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, depthBuffer: false });
@@ -130,6 +132,8 @@ export function createHeroPost({ renderer, scene, camera, aura = true, bloom = t
   // ───────── aura: mask -> flame field -> finalize (all half-res) ─────────
   const noise = makeNoiseTexture();
   let maskMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });   // a creature may swap it (setMaskMaterial)
+  const occluderMat = new THREE.MeshBasicMaterial({ colorWrite: false });
+  const occluders = !!params.occluders;
   const flameUniforms = {
     tMask: { value: maskRT.texture }, tNoise: { value: noise },
     uTime: { value: 0 }, uIntensity: { value: params.intensity ?? 1.0 }, uHeight: { value: params.height ?? 0.36 },
@@ -169,12 +173,19 @@ export function createHeroPost({ renderer, scene, camera, aura = true, bloom = t
     sceneRT, maskRT, flameRT, auraRT,
     /** the silhouette material (default: plain white). A creature that dissolves / burns passes one with the same discard. */
     setMaskMaterial(m) { maskMat = m; },
+    /** MSAA of the scene target (0 / 2 / 4); the target is rebuilt on its next use */
+    setSamples(n) { if (sceneRT.samples !== n) { sceneRT.samples = n; sceneRT.dispose(); } },
+    get samples() { return sceneRT.samples; },
+    /** render scale 0.5..1 of the canvas resolution (the final pass upsamples) */
+    setScale(sc) { if (sc !== renderScale) { renderScale = sc; setSize(); } },
+    get scale() { return renderScale; },
   };
 
   // ───────── sizes ─────────
+  let renderScale = params.scale ?? 1;                 // dynamic resolution: the scene (and everything after it) at a fraction of the canvas
   function setSize() {
     renderer.getDrawingBufferSize(size);
-    const W = Math.max(2, size.x), H = Math.max(2, size.y);
+    const W = Math.max(2, Math.round(size.x * renderScale)), H = Math.max(2, Math.round(size.y * renderScale));
     sceneRT.setSize(W, H);
     const hw = HALF(W), hh = HALF(H);
     for (const rt of [maskRT, flameRT, auraRT]) rt.setSize(hw, hh);
@@ -208,6 +219,11 @@ export function createHeroPost({ renderer, scene, camera, aura = true, bloom = t
       scene.overrideMaterial = maskMat; scene.background = null;
       camera.layers.set(LAYER_SILHOUETTE);
       clear(maskRT, 1);
+      if (occluders) {                                   // depth of the scenery first, then the bird behind it is hidden
+        scene.overrideMaterial = occluderMat; camera.layers.set(LAYER_OCCLUDER);
+        renderer.render(scene, camera);
+        scene.overrideMaterial = maskMat; camera.layers.set(LAYER_SILHOUETTE);
+      }
       renderer.render(scene, camera);
       scene.overrideMaterial = prevOverride; scene.background = prevBg;
       pass(flameMat, flameRT);
