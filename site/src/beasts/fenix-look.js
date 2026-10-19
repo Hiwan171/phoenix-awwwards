@@ -7,12 +7,15 @@
 //   3. FLOW         bands of heat run along every feather chain toward its tip (aTip), broken by a noise glued to the rest pose
 //   4. LIGHT        a hot Fresnel rim, and the sun shining THROUGH the feathers when she flies against it (thin-sheet translucency)
 //   5. EYES         two small gold coals in the eye ellipses (closed by the blink)
+//   6. VERTEX       (before skinning, so the rig carries it) the chest swells with each breath, and the free edges of the feathers
+//                   shiver in the wind: a coherent noise of the rest position along the normal (neighbouring sheets move together,
+//                   no gaps open), weighted by aTip (roots still, edges free)
 //
 // Optional: a burn dissolve on the outermost feather tips with an incandescent edge (uBurn, 0 = off).
 // Everything that moves runs on uTime (wall clock: she smoulders even when the scroll stops) and uHeat (the scene's intensity).
 //
 //   const look = applyFenixLook(skinnedMesh)                              after applyEyes (or before: it chains either way)
-//   per frame:  look.update({ time, heat, camera, sunDir, blink })
+//   per frame:  look.update({ time, heat, camera, sunDir, blink, breath, wind })
 import * as THREE from 'three';
 import { buildTipMeshy } from './fenix-fire.js';
 import { EYES } from './fenix-eyes.js';
@@ -27,11 +30,14 @@ export const LOOK_DEFAULTS = {
   trans: 1.0,        // sunlight through the feathers
   eyes: 1.0,         // eye glow
   burn: 0.0,         // tip dissolve (0 = off)
+  flutter: 0.009,    // feather-edge shiver at full wind (model units, along the normal)
+  breath: 0.010,     // chest swell at a full breath (model units)
 };
 
 const GLSL_COMMON = /* glsl */`
 varying float vLkTip; varying vec3 vLkRest;
-uniform float uLkAlbedo, uLkTime, uLkHeat, uLkGrade, uLkEmbers, uLkFlow, uLkTips, uLkRim, uLkTrans, uLkEyes, uLkBurn, uLkBlink;
+uniform float uLkTime;
+uniform float uLkAlbedo, uLkHeat, uLkGrade, uLkEmbers, uLkFlow, uLkTips, uLkRim, uLkTrans, uLkEyes, uLkBurn, uLkBlink;
 uniform vec3 uLkSunView, uLkSunCol;
 uniform vec4 uLkEye0, uLkEye1;
 float lkHash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
@@ -53,6 +59,32 @@ vec3 lkFire(float x) {
 }
 float lkLum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 float lkEye(vec2 uv, vec4 e) { vec2 d = (uv - e.xy) / e.zw; return 1.0 - smoothstep(0.55, 1.05, length(d)); }`;
+
+const GLSL_VERTEX_COMMON = /* glsl */`
+attribute float aTip; varying float vLkTip; varying vec3 vLkRest;
+uniform float uLkTime, uLkBreath, uLkWind, uLkFlutter, uLkChestR;
+uniform vec3 uLkChest;
+float lkvHash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float lkvNoise(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(lkvHash(i), lkvHash(i + vec3(1,0,0)), f.x), mix(lkvHash(i + vec3(0,1,0)), lkvHash(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(lkvHash(i + vec3(0,0,1)), lkvHash(i + vec3(1,0,1)), f.x), mix(lkvHash(i + vec3(0,1,1)), lkvHash(i + vec3(1,1,1)), f.x), f.y), f.z);
+}`;
+
+const GLSL_VERTEX = /* glsl */`
+  vLkTip = aTip; vLkRest = position;
+  {
+    // breathing: the body around the chest swells along its normal (feathers barely: they ride on it)
+    float chestW = (1.0 - smoothstep(0.0, uLkChestR, length(position - uLkChest))) * (1.0 - smoothstep(0.05, 0.35, aTip));
+    transformed += normal * chestW * uLkBreath;
+    // flutter: the free edges of the feathers shiver; two octaves of a noise that flows downwind through the rest pose
+    float fw = smoothstep(0.3, 1.0, aTip);
+    if (fw > 0.0 && uLkWind > 0.0) {
+      vec3 q = position * 7.0 + vec3(uLkTime * 4.1, uLkTime * 2.3, uLkTime * 3.2);
+      float nn = (lkvNoise(q) - 0.5) + 0.5 * (lkvNoise(q * 2.3 + 5.1) - 0.5);
+      transformed += normal * nn * fw * fw * uLkFlutter * uLkWind;
+    }
+  }`;
 
 const GLSL_BURN = /* glsl */`
   float lkEdge = 0.0;
@@ -116,15 +148,34 @@ const GLSL_EMISSIVE = /* glsl */`
     totalEmissiveRadiance += em;
   }`;
 
+/** The chest, in the geometry's bind space: the centroid of the body vertices (aTip ~ 0) carried by the spine joints of the chest. */
+function findChest(mesh) {
+  const g = mesh.geometry, pos = g.attributes.position, si = g.attributes.skinIndex, sw = g.attributes.skinWeight, tip = g.attributes.aTip.array;
+  const names = mesh.skeleton.bones.map((b) => b.name), chestJ = new Set(['Spine_02', 'Spine_03', 'Spine_04'].map((n) => names.indexOf(n)).filter((i) => i >= 0));
+  const c = new THREE.Vector3(), v = new THREE.Vector3(); let n = 0;
+  for (let i = 0; i < pos.count; i++) {
+    if (tip[i] > 0.05) continue;
+    let w = 0; for (let k = 0; k < 4; k++) if (chestJ.has(si.getComponent(i, k))) w += sw.getComponent(i, k);
+    if (w > 0.6) { c.add(v.fromBufferAttribute(pos, i)); n++; }
+  }
+  if (n) c.divideScalar(n);
+  // radius: the median distance of those vertices to the centre, a little widened
+  const d = []; for (let i = 0; i < pos.count && d.length < 4000; i += 3) { if (tip[i] > 0.05) continue; let w = 0; for (let k = 0; k < 4; k++) if (chestJ.has(si.getComponent(i, k))) w += sw.getComponent(i, k); if (w > 0.6) d.push(v.fromBufferAttribute(pos, i).distanceTo(c)); }
+  d.sort((a, b) => a - b);
+  return { center: c, radius: (d[d.length >> 1] ?? 0.2) * 1.6, count: n };
+}
+
 /** Patches the phoenix's MeshStandardMaterial. Returns { uniforms, set(params), update(frame) }. */
 export function applyFenixLook(mesh, params = {}) {
   const material = mesh.material;
   if (!mesh.geometry.attributes.aTip) buildTipMeshy(mesh);
   const P = { ...LOOK_DEFAULTS, ...params };
+  const chest = findChest(mesh);
   const U = {
     uLkAlbedo: { value: P.albedo }, uLkTime: { value: 0 }, uLkHeat: { value: 1 }, uLkBlink: { value: 0 },
     uLkGrade: { value: P.grade }, uLkEmbers: { value: P.embers }, uLkFlow: { value: P.flow }, uLkTips: { value: P.tips },
     uLkRim: { value: P.rim }, uLkTrans: { value: P.trans }, uLkEyes: { value: P.eyes }, uLkBurn: { value: P.burn },
+    uLkBreath: { value: 0 }, uLkWind: { value: 0 }, uLkFlutter: { value: P.flutter }, uLkChest: { value: chest.center }, uLkChestR: { value: chest.radius },
     uLkSunView: { value: new THREE.Vector3(0, 0, 1) }, uLkSunCol: { value: new THREE.Color(1.0, 0.62, 0.30) },
     uLkEye0: { value: new THREE.Vector4(...EYES[0]) }, uLkEye1: { value: new THREE.Vector4(...EYES[1]) },
   };
@@ -133,27 +184,29 @@ export function applyFenixLook(mesh, params = {}) {
     prev?.(shader, renderer);
     Object.assign(shader.uniforms, U);
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aTip; varying float vLkTip; varying vec3 vLkRest;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLkTip = aTip; vLkRest = position;');
+      .replace('#include <common>', `#include <common>\n${GLSL_VERTEX_COMMON}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${GLSL_VERTEX}`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${GLSL_COMMON}`)
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\n${GLSL_BURN}`)
       .replace('#include <color_fragment>', `#include <color_fragment>\n${GLSL_GRADE}`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${GLSL_EMISSIVE}`);
   };
-  material.customProgramCacheKey = ((old) => () => (old ? old() : '') + '|look1')(material.customProgramCacheKey?.bind(material));
+  material.customProgramCacheKey = ((old) => () => (old ? old() : '') + '|look2')(material.customProgramCacheKey?.bind(material));
   material.needsUpdate = true;
 
   const sunView = new THREE.Vector3();
   return {
-    uniforms: U,
+    uniforms: U, chest,
     set(p) {
       const map = { albedo: 'uLkAlbedo', grade: 'uLkGrade', embers: 'uLkEmbers', flow: 'uLkFlow', tips: 'uLkTips', rim: 'uLkRim', trans: 'uLkTrans', eyes: 'uLkEyes', burn: 'uLkBurn' };
       for (const k of Object.keys(p)) if (map[k]) U[map[k]].value = p[k];
     },
-    /** time: seconds (wall clock); heat: scene intensity (1 = normal); sunDir: world direction TO the sun; blink 0..1 */
-    update({ time, heat = 1, camera, sunDir, blink = 0 }) {
+    /** time: seconds (wall clock); heat: scene intensity (1 = normal); sunDir: world direction TO the sun; blink 0..1;
+     *  breath -1..1 (the rig's breathing, so chest and spine agree); wind 0..1 (feather-edge shiver) */
+    update({ time, heat = 1, camera, sunDir, blink = 0, breath = 0, wind = 0 }) {
       U.uLkTime.value = time; U.uLkHeat.value = heat; U.uLkBlink.value = blink;
+      U.uLkBreath.value = breath * P.breath; U.uLkWind.value = wind;
       if (camera && sunDir) { sunView.copy(sunDir).transformDirection(camera.matrixWorldInverse); U.uLkSunView.value.copy(sunView); }
     },
   };

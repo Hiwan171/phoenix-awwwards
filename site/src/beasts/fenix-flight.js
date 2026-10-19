@@ -15,6 +15,12 @@
 //   P.load      -1..1  the flight's acceleration load (pull-up +, push-over -): wings flex, tail and legs trail, the neck lags
 //   P.alert     0..1  how much the bird looks around (scanning); drops when she is diving at a target. Also scales the head's life
 //   P.stretch   0..1  how far the neck and body are stretched out (glide, dive) -- the spine chain (Spine_00..) does all of it
+//   P.sleep     0..1  asleep on a perch: the neck curls down, the chin rests on the chest, the gaze stops, the breathing deepens
+//   P.wind      0..1  strength of the wind on the feathers; P.windX/Y/Z its direction in the MODEL frame (the bird faces -x).
+//                     Gusts travel across the body downwind: every feather chain bends with the wind and flutters, tips most
+//   P.shake     0..1  feathers ruffled and shaken out (waking up): a quick shiver of the body and the plumage; P.shakePh its phase
+//               in cycles (from the timeline, like the wing beat: it plays as the scroll passes and holds when it stops)
+//   P.hug       0..1  folded wings drawn in against the body (seen from the front the plain fold holds them out like arms)
 //
 // Every bone is posed in WORLD space: a rotation delta applied on top of its rest world rotation (so a wing beats about the BODY
 // axis whatever the bones' own axes are), and its local rotation is derived from the posed parent.  A bone with no rule inherits
@@ -28,7 +34,7 @@ const TAU = Math.PI * 2;
 
 export const FLIGHT_DEFAULTS = {
   t: 0, phase: 0, flap: 1, open: 1, sweep: 0, legs: 0, tail: 0.5, bank: 0, pitch: 0, pitchRate: 0, yawRate: 0, lookYaw: 0, lookPitch: 0,
-  fly: 0, stretch: 0.5, alert: 1, rate: 0, load: 0,
+  fly: 0, stretch: 0.5, alert: 1, rate: 0, load: 0, sleep: 0, wind: 0, windX: 0, windY: 0, windZ: 1, shake: 0, shakePh: 0, hug: 0,
 };
 
 // Poses of a fully folded wing (cl = 1). Angles are added on top of the open pose; they are what the lab's "fold" sliders edit.
@@ -95,6 +101,28 @@ export const HEAD_TARGET = { v: 121 };      // calibrated by measuring the BEAK 
 // The head joint's bone is VERTICAL at rest (the standing bird's neck and head), the beak is perpendicular to it: a head segment at ~85
 // degrees keeps the beak pointing FORWARD (horizontal). The neck rises in between (an S), so the head sits high and looks ahead.
 const FLIGHT_THETA = [-8, -6, -3, 0, 8, 18, 28, 38, 62, HEAD_TARGET.v - 4, HEAD_TARGET.v];
+// asleep: extra pitch (degrees, + = the front goes down) of each spine segment, pelvis .. head. The neck is nearly VERTICAL at rest, so
+// tilting it forward only moves the head forward: it folds in an S instead (the base leans back into the shoulders, the middle bends
+// forward), and the head SINKS into the shoulders rather than bowing (the big crest is part of the head mesh: a head bowed past ~50
+// degrees stands it straight up). Measured: the head joint drops 0.17 and sits just in front of the chest, tilted 40 degrees down
+export const SLEEP_THETA = [0, 0, 0, 0, -60, -40, -10, 60, 85, 50, 40];
+// breathing: share of the breath's pitch per segment (the chest rises and falls, the head barely)
+const BREATH_W = [0.4, 1.0, 1.0, 0.8, 0.5, 0.3, 0.2, 0.1, 0.05, 0.03, 0.02];
+/** breathing, -1..1: ~4.6 s a breath, the in-breath a little quicker than the out-breath */
+export const breathAt = (t) => { const x = (((t / 4.6) % 1) + 1) % 1; return Math.sin(TAU * (x + 0.08 * Math.sin(TAU * x))); };
+/** wind strength at time t for a point `s` model units downwind: a slow swell, travelling gusts, and every ~6.5 s a burst that rises
+ *  in ~0.6 s and dies away. The field moves downwind (x = t - s * 0.6) so a gust crosses the bird from the windward side. */
+export function gustAt(t, s) {
+  const x = t - s * 0.6;
+  let g = 0.55 + 0.18 * Math.sin(TAU * 0.13 * x + 0.7) + 0.11 * Math.sin(TAU * 0.31 * x + 2.1) + 0.06 * Math.sin(TAU * 0.73 * x + 0.3);
+  const T = 6.5, k0 = Math.floor(x / T);
+  for (let k = k0 - 1; k <= k0; k++) {
+    const e = x - (k * T + hash1(k, 9) * 3.2);
+    if (e > 0) { const q = e / 0.6; g += (0.3 + 0.45 * hash1(k, 11)) * q * Math.exp(1 - q); }
+  }
+  return g;
+}
+export const HUG = { down: 0.3, sweep: 0.0 };     // the extra closure of a hugged wing (rad, at the shoulder)
 const WING_A = [36, 35, 34, 50], WING_B = [39, 38, 37, 55];     // shoulder, arm, forearm, hand (A at z < 0, B at z > 0)
 const LEGS = [[6, 5, 4, 3, 2], [13, 12, 11, 10, 9]];
 const TAILS = [[19, 18, 17, 16, 15, 14], [25, 24, 23, 22, 21, 20], [31, 30, 29, 28, 27, 26]];
@@ -208,6 +236,14 @@ export function createFenixFlight(model, opts = {}) {
     }
     f.joints.forEach((i, j) => { if (i !== undefined) role[i] = { kind: 'feather', f, j, bi: i }; });
   }
+  // rest direction (root -> last joint) and root position of every chain, for the wind
+  const chainDir = (joints) => {
+    const a = joints[0], b = joints[joints.length - 1] ?? a, ch = bones[b].children.find((c) => c.isBone), e = ch ? byName.get(ch.name) : b;
+    const d = [restWP[e * 3] - restWP[a * 3], restWP[e * 3 + 1] - restWP[a * 3 + 1], restWP[e * 3 + 2] - restWP[a * 3 + 2]], l = Math.hypot(...d) || 1;
+    return { d: d.map((x) => x / l), p: [restWP[a * 3], restWP[a * 3 + 1], restWP[a * 3 + 2]] };
+  };
+  for (const f of feathers.values()) Object.assign(f, chainDir(f.joints.filter((i) => i !== undefined)));
+  for (const chain of [...TAILS, CREST]) { const js = chain.map(idxOf).filter((i) => i !== undefined); const cd = chainDir(js); for (const i of js) if (role[i]) Object.assign(role[i], { wd: cd.d, wp: cd.p }); }
   // tail feather chains spread about their roots by their lateral position
   let zMin = Infinity, zMax = -Infinity;
   for (const f of feathers.values()) if (f.region === 'tail') { const z = restWP[f.joints[0] * 3 + 2]; zMin = Math.min(zMin, z); zMax = Math.max(zMax, z); }
@@ -222,6 +258,30 @@ export function createFenixFlight(model, opts = {}) {
   const rootBone = bones[idxOf(0)];
   const rootRest = [restLP[idxOf(0) * 3], restLP[idxOf(0) * 3 + 1], restLP[idxOf(0) * 3 + 2]];
 
+  /** wind on a chain joint, into o: bends the chain toward the wind (in the bone's REST frame: the wind is brought back through the
+   *  parent's delta) and makes it flutter. d / p: the chain's rest direction and root position; amp: total bend (rad) at gust 1,
+   *  shared over the chain; flut: flutter amplitude; fq: flutter frequency (Hz); j / K: joint and chain length; ph: phase */
+  const WV = [0, 0, 0], WQ = new Float64Array(4), WQ2 = new Float64Array(4);
+  function windQ(o, d, p, base, P, amp, flut, fq, j, K, ph) {
+    if (!(P.wind > 0)) return qset(o, 0, 0, 0, 1);
+    // conj(base) * w * base: the wind in the frame where this joint's delta is applied
+    const bx = -base[0], by = -base[1], bz = -base[2], bw = base[3], vx = P.windX, vy = P.windY, vz = P.windZ;
+    const tx = 2 * (by * vz - bz * vy), ty = 2 * (bz * vx - bx * vz), tz = 2 * (bx * vy - by * vx);
+    WV[0] = vx + bw * tx + (by * tz - bz * ty); WV[1] = vy + bw * ty + (bz * tx - bx * tz); WV[2] = vz + bw * tz + (bx * ty - by * tx);
+    const g = gustAt(P.t, p[0] * vx + p[1] * vy + p[2] * vz) * P.wind;
+    let ax = d[1] * WV[2] - d[2] * WV[1], ay = d[2] * WV[0] - d[0] * WV[2], az = d[0] * WV[1] - d[1] * WV[0];
+    const len = Math.hypot(ax, ay, az);
+    if (len < 1e-4) return qset(o, 0, 0, 0, 1);
+    ax /= len; ay /= len; az /= len;
+    const u = K > 1 ? j / (K - 1) : 1, tipW = (0.35 + 0.65 * u) * 2 / (K + 1);           // shares: the outer joints flutter more
+    const fl = flut * g * tipW * (0.6 * Math.sin(TAU * fq * P.t + ph - 0.55 * j) + 0.4 * Math.sin(TAU * fq * 1.73 * P.t + 1.3 * ph - 0.8 * j));
+    qaxis(WQ, ax, ay, az, amp * g * Math.min(1, len * 1.5) / K + fl);                     // bend in the wind's plane (+ its flutter)
+    // a sideways flutter, out of that plane (about d x axis), smaller
+    const sx = d[1] * az - d[2] * ay, sy = d[2] * ax - d[0] * az, sz = d[0] * ay - d[1] * ax;
+    qaxis(WQ2, sx, sy, sz, 0.5 * flut * g * tipW * Math.sin(TAU * fq * 1.31 * P.t + 2.1 * ph - 0.6 * j));
+    return qmul(o, WQ, WQ2);
+  }
+
   /** delta of the bone into `out`, given the parent's delta `base`; null role -> inherit */
   function deltaOf(r, base, P, out) {
     const ph = P.phase, t = P.t, fl = P.flap;
@@ -234,7 +294,8 @@ export function createFenixFlight(model, opts = {}) {
         const bankDiff = P.bank * 0.35 * s;                           // the inner wing drops a little, the outer one rises
         if (j === 0) {                                                // shoulder: balance, sweep back, lower (closing), beat
           ry(A, s * (0.14 * fb + P.sweep * 0.55 * (1 - cl) + fold.sweep * cl));
-          rx(B, -s * (raise - bankDiff * (1 - cl)) + s * fold.down * cl);
+          rx(B, -s * (raise - bankDiff * (1 - cl)) + s * (fold.down + HUG.down * P.hug) * cl);
+          if (P.hug > 0) { ry(D, s * HUG.sweep * P.hug * cl); qmul(E, D, A); qset(A, E[0], E[1], E[2], E[3]); }
           // The wing's own motion is ABSOLUTE (the sculpt's wing is already spread for flight; the chest turns ~80 degrees into the flight posture
           // and the wing must not, it would stand up). Only the SHOULDER bone follows the body (shoulderBody), and the arm gives it back.
           wingCorr(w, E, fold.corrK); qmul(C, A, E); qmul(w.Wsh ?? (w.Wsh = new Float64Array(4)), B, C);    // the wing's own motion at the shoulder
@@ -269,6 +330,11 @@ export function createFenixFlight(model, opts = {}) {
           rx(A, -s * f.A * g * 0.9 * trail * fl * (0.4 + 0.6 * open) * ck);
           ry(B, f.A * g * 0.6 * flutter * (0.5 + 0.5 * open) * ck);
           qmul(C, A, B);
+          if (P.wind > 0 || P.shake > 0) {                            // folded wing: the wind only stirs the outer feathers (the layers must stay closed)
+            windQ(D, f.d, f.p, base, P, 0.10 * (0.3 + 0.7 * f.s), 0.05 * (0.4 + 0.6 * f.s), 3.1, j, f.K, f.p1);
+            qmul(E, C, D); qset(C, E[0], E[1], E[2], E[3]);
+            if (P.shake > 0) { rx(D, s * P.shake * 0.05 * g * Math.sin(TAU * P.shakePh + 0.8 * f.s)); qmul(E, C, D); qset(C, E[0], E[1], E[2], E[3]); }
+          }
           if (j === 0) {                                              // the fan closes about the feather's ROOT
             ry(D, s * fold.fan * cl * (f.s - 0.35 + fold.fanBias)); qmul(E, C, D); return qmul(out, base, E);
           }
@@ -281,11 +347,17 @@ export function createFenixFlight(model, opts = {}) {
         const spreadK = 1 / Math.max(1, f.K);
         const turn = f.region === 'tail' ? clampT(-P.yawRate * 0.30, 0.20) * spreadK * 2 * g : 0;
         const pit = f.region === 'tail' ? clampT(P.pitchRate * 0.30 + P.load * 0.08, 0.18) * spreadK * 2 * g : 0;
-        const comb = f.region === 'crest' ? -P.fly * (j === 0 ? 0.55 : 0.18) : f.region === 'back' ? -P.fly * (j === 0 ? 0.35 : 0.1) : 0;         // the wind combs head and mane strands back
+        const comb = f.region === 'crest' ? -(P.fly + 0.6 * P.sleep) * (j === 0 ? 0.55 : 0.18) : f.region === 'back' ? -P.fly * (j === 0 ? 0.35 : 0.1) : 0;         // the wind combs head and mane strands back
         const chainK = f.region === 'tail' ? Math.min(1, 4 / f.K) : 1;          // long strips: the same TOTAL wave as a short one
+        const ruff = f.region === 'tail' ? 0 : -P.shake * (j === 0 ? 0.22 : 0.05) * (0.7 + 0.3 * Math.sin(TAU * 1.07 * P.shakePh + f.p1));   // shaken out: the plumage lifts
         ry(A, f.A * g * flutter * chainK + turn + spread);
-        rz(B, f.A * g * 0.8 * Math.sin(TAU * (ph - f.lagBeat) - 0.4 * j) * fl * chainK + pit + comb);
+        rz(B, f.A * g * 0.8 * Math.sin(TAU * (ph - f.lagBeat) - 0.4 * j) * fl * chainK + pit + comb + ruff);
         qmul(C, A, B);
+        if (P.wind > 0) {
+          // the long tail plumes stream and wave, the crest strands whip, the back feathers lift and settle
+          const W = f.region === 'tail' ? [1.1, 0.34, 1.1] : f.region === 'crest' ? [1.2, 0.5, 2.4] : [0.28, 0.12, 2.2];
+          windQ(D, f.d, f.p, base, P, W[0], W[1], W[2], j, f.K, f.p1); qmul(E, C, D); qset(C, E[0], E[1], E[2], E[3]);
+        }
         if (f.region === 'back') return qmul(out, spineAt(r.bi, r, E), C);        // a back feather lies ON the back: each joint follows the spine where it sits
         return qmul(out, base, C);
       }
@@ -293,7 +365,9 @@ export function createFenixFlight(model, opts = {}) {
         const idx = r.j;
         ry(A, 0.045 * Math.sin(TAU * (2 * t / 2.5 - 0.5 - 0.09 * idx - 0.12 * r.c)) / r.len * 2 + clampT(-P.yawRate * 0.18, 0.12) / r.len);
         rz(B, 0.03 * Math.sin(TAU * (2 * t / 2.5 - 0.35 - 0.1 * idx)) / r.len * 2 + clampT(P.pitchRate * 0.2 + P.load * 0.1, 0.12) / r.len);
-        qmul(C, A, B); return qmul(out, base, C);
+        qmul(C, A, B);
+        if (P.wind > 0 && r.wd) { windQ(D, r.wd, r.wp, base, P, 0.4, 0.1, 0.8, idx, r.len, r.c * 1.7); qmul(E, C, D); return qmul(out, base, E); }
+        return qmul(out, base, C);
       }
       case 'pelvis': {
         // Bone_001 carries the belly, the legs and the tail base; Spine_00 carries the back right above it. They MUST move as one
@@ -317,7 +391,9 @@ export function createFenixFlight(model, opts = {}) {
         qmul(D, A, B); qmul(E, D, C); return qmul(out, base, E);
       }
       case 'crest': {
-        rz(A, 0.12 * Math.sin(TAU * (2 * t / 2.5 - 0.18 * r.j)) - 0.15 * P.pitchRate * (r.j + 1) - P.fly * (r.j === 0 ? 0.75 : 0.25));      // in flight the wind combs the crest back
+        rz(A, 0.12 * Math.sin(TAU * (2 * t / 2.5 - 0.18 * r.j)) * (1 - 0.6 * P.sleep) - 0.15 * P.pitchRate * (r.j + 1) - P.fly * (r.j === 0 ? 0.75 : 0.25)
+              - P.sleep * (r.j === 0 ? 1.0 : 0.35));      // in flight the wind combs the crest back; asleep it lies back along the bowed head
+        if (P.wind > 0 && r.wd) { windQ(D, r.wd, r.wp, base, P, 0.5, 0.2, 1.9, r.j, 3, 0.4); qmul(E, A, D); return qmul(out, base, E); }
         return qmul(out, base, A);
       }
       case 'back': {
@@ -336,16 +412,21 @@ export function createFenixFlight(model, opts = {}) {
         // the body wave (rises and falls with the stroke) is cancelled in the head: birds hold the head still against the flapping body
         const wave = (2.6 + 1.6 * neckw) * Math.sin(TAU * (P.phase - 0.07 * j)) * P.flap * f * (1 - 0.88 * hw) + 0.9 * Math.sin(TAU * (t / 4.2) - 0.3 * j) * (1 - hw);
         gazeAt(t, G);
-        const look = P.alert * (1 - 0.55 * st * f);                                           // scanning calms down when she is stretched out on a dive
+        const sl = P.sleep;
+        const look = P.alert * (1 - 0.55 * st * f) * (1 - sl);                                // scanning calms down when she is stretched out on a dive; none asleep
         const yaw = hw * (G[0] * look + P.lookYaw) + (hw === 0 ? -P.bank * 0.28 * (j / K) * 0 : 0);
         const pit = hw * (G[1] * look + P.lookPitch) * 57.3 + hw * HEAD_STAB.v * P.pitch * 57.3;        // plus: the head stays level against the body's pitch
         const roll = hw * (-0.85 * P.bank + G[2] * look);                                      // and against its roll (the eyes keep the horizon)
         // the neck S: a slow drift of the neck curve, and a small lead of the head toward the next wing stroke
         const nk = j >= 4 ? -P.load * 6 * neckw * (1 - hw) + (1 - hw) * 0 + 0 : 0;
         const nk2 = j >= 4 ? 1.8 * Math.sin(TAU * (t / 3.7) - 0.9 * j) * (1 - hw * 0.5) + 1.1 * Math.sin(TAU * (P.phase + 0.18 * (j - 3))) * P.flap * f * hw : 0;
-        rz(A, ((th + wave + pit + nk + nk2) * Math.PI) / 180);
-        ry(B, yaw - P.bank * 0.28 * (j / K) + (j < K - 5 ? 0.02 * Math.sin(TAU * (t / 6) - 0.5 * j) : 0));
-        rx(D, roll);
+        // asleep: the curl of the neck; breathing (deeper asleep); the wind buffets the neck and head a little (sideways, with the gusts)
+        const br = breathAt(t - 0.12 * j) * (1.1 + 1.6 * sl) * BREATH_W[j] * (1 - f);
+        const gw = P.wind > 0 ? (gustAt(t - 0.25, 0) - 0.55) * P.wind * (1 - f) * (0.4 + 0.6 * neckw) : 0;
+        const shv = P.shake * Math.sin(TAU * P.shakePh - 0.6 * j) * (j < 6 ? 0.07 : 0.03) * (1 - f);
+        rz(A, ((th + wave * (1 - 0.6 * sl) + pit + nk + nk2 * (1 - 0.8 * sl) + SLEEP_THETA[j] * sl + br) * Math.PI) / 180);
+        ry(B, yaw - P.bank * 0.28 * (j / K) + (j < K - 5 ? 0.02 * Math.sin(TAU * (t / 6) - 0.5 * j) : 0) + gw * 0.035 * P.windZ);
+        rx(D, roll + gw * 0.03 * Math.sign(P.windZ || 1) + shv);
         if (j === 0) {                                                                       // the pelvis end: it also rides the wing beat a touch after the chest, leans into the turn, breathes
           rz(tmp3, ((3.4 + 1.6 * st) * Math.sin(TAU * (P.phase + 0.10)) * P.flap * f * Math.PI) / 180);
           qmul(E, tmp3, A); qset(A, E[0], E[1], E[2], E[3]);
@@ -405,5 +486,5 @@ export function createFenixFlight(model, opts = {}) {
   function reset() {
     for (let i = 0; i < n; i++) { bones[i].quaternion.set(restLQ[i * 4], restLQ[i * 4 + 1], restLQ[i * 4 + 2], restLQ[i * 4 + 3]); bones[i].position.set(restLP[i * 3], restLP[i * 3 + 1], restLP[i * 3 + 2]); }
   }
-  return { pose, reset, bones, byName, feathers, wings, fold, FOLD };
+  return { pose, reset, bones, byName, feathers, wings, fold, FOLD, SLEEP_THETA, HUG };
 }

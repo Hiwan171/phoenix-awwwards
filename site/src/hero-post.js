@@ -138,7 +138,7 @@ export function createHeroPost({ renderer, scene, camera, aura = true, bloom = t
     tMask: { value: maskRT.texture }, tNoise: { value: noise },
     uTime: { value: 0 }, uIntensity: { value: params.intensity ?? 1.0 }, uHeight: { value: params.height ?? 0.36 },
     uWarp: { value: params.warp ?? 1.0 }, uAspect: { value: innerWidth / innerHeight },
-    uSteps: { value: params.steps ?? 20 }, uDensity: { value: params.density ?? 1.0 }, uDebug: { value: 0 },
+    uSteps: { value: params.steps ?? 20 }, uDensity: { value: params.density ?? 1.0 }, uDebug: { value: 0 }, uLean: { value: params.lean ?? 0 },
   };
   const flameMat = new THREE.ShaderMaterial({ uniforms: flameUniforms, vertexShader: QUAD_VERT, fragmentShader: FLAME_FRAG, depthTest: false, depthWrite: false });
   const finalizeUniforms = {

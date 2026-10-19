@@ -8,7 +8,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { createFenixFlight } from './beasts/fenix-flight.js';
+import { createFenixFlight, breathAt, gustAt } from './beasts/fenix-flight.js';
 import { createPath, createTimeline } from './beasts/flight-path.js';
 import { applyEyes, blinkAt } from './beasts/fenix-eyes.js';
 import { applyFenixLook } from './beasts/fenix-look.js';
@@ -37,7 +37,7 @@ Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4 });
 scene.add(sun, sun.target);
 scene.add(new THREE.HemisphereLight(0xffb48a, 0x2a1820, 0.9));
 const camera = new THREE.PerspectiveCamera(38, 1, 0.05, 600);
-let post = null, embers = null; const BUF = new THREE.Vector2();
+let post = null, embers = null; const BUF = new THREE.Vector2(), camRight = new THREE.Vector3();
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); post?.setSize(); }
 addEventListener('resize', resize); resize();
 if (LOOK) post = createHeroPost({ renderer, scene, camera, aura: Q.get('aura') !== '0', bloom: Q.get('bloom') !== '0', params: {
@@ -72,6 +72,7 @@ if (LOOK) post = createHeroPost({ renderer, scene, camera, aura: Q.get('aura') !
 }
 
 // ───────────── terrain: a heightfield known in JS (the feet stand on it) ─────────────
+const sceneryDrifts = [];
 const PEAK = { x: 0, z: 0, top: 13.0 }, LEDGE = { x: -12, z: -40, top: 7.0 };
 const hash = (x, y) => { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); };
 const vnoise = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
@@ -126,7 +127,52 @@ for (const q of PATCHES) terrainMesh(q.size, q.seg, q.x, q.z, false);
   const N = 900, g = new THREE.BufferGeometry(), p = new Float32Array(N * 3);
   for (let i = 0; i < N; i++) { p[i*3] = (hash(i, 1) - 0.5) * 70 - 6; p[i*3+1] = 3 + hash(i, 2) * 16; p[i*3+2] = (hash(i, 3) - 0.5) * 70 - 20; }
   g.setAttribute('position', new THREE.BufferAttribute(p, 3));
-  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffa060, size: 0.06, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending })));
+  const m = new THREE.PointsMaterial({ color: 0xffa060, size: 0.06, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending });
+  windDrift(m, { box: new THREE.Vector3(70, 16, 70), centre: new THREE.Vector3(-6, 11, -20), follow: false });
+  scene.add(new THREE.Points(g, m));
+}
+// fine ash in a box that follows the bird: it streams past her with the gusts (the wind made visible in the close shots)
+const motes = (() => {
+  const N = 700, g = new THREE.BufferGeometry(), p = new Float32Array(N * 3), B = new THREE.Vector3(9, 4, 9);
+  for (let i = 0; i < N; i++) { p[i*3] = (hash(i, 11) - 0.5) * B.x; p[i*3+1] = (hash(i, 12) - 0.5) * B.y; p[i*3+2] = (hash(i, 13) - 0.5) * B.z; }
+  g.setAttribute('position', new THREE.BufferAttribute(p, 3));
+  const m = new THREE.PointsMaterial({ color: 0xffc89a, size: 0.012, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending });
+  const d = windDrift(m, { box: B, centre: new THREE.Vector3(), follow: true });
+  const pts = new THREE.Points(g, m); pts.frustumCulled = false; scene.add(pts);
+  return { update: (t, gust, centre) => d.update(t, gust, centre) };
+})();
+/** Points that drift downwind and wrap around a box (centred on the scenery, or on the bird with follow). The drift is integrated
+ *  on the wall clock (a gust pushes them faster), so it is a feel, not part of the scroll-bound story. */
+function windDrift(material, { box, centre, follow }) {
+  const U = { uDrift: { value: new THREE.Vector3() }, uBox: { value: box }, uCentre: { value: centre.clone() } };
+  material.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform vec3 uDrift, uBox, uCentre;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        // wrap the drifted point into the box around the centre (each point keeps its own place in the box)
+        transformed = uCentre + mod(position + uDrift - uCentre + uBox * 0.5, uBox) - uBox * 0.5;
+        transformed.y += sin(position.x * 1.7 + uDrift.x * 0.6) * 0.15;`)
+      // a point right in front of the lens would be a big square: drop it, and fade the near ones in
+      .replace('#include <fog_vertex>', `#include <fog_vertex>
+        vNear = smoothstep(0.6, 1.6, -mvPosition.z);
+        if (-mvPosition.z < 0.6) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);`)
+      .replace('void main() {', 'varying float vNear;\nvoid main() {');
+    sh.fragmentShader = sh.fragmentShader.replace('void main() {', 'varying float vNear;\nvoid main() {')
+      .replace('#include <premultiplied_alpha_fragment>', `#include <premultiplied_alpha_fragment>
+        { float r = length(gl_PointCoord - 0.5) * 2.0; if (r > 1.0) discard; gl_FragColor *= (1.0 - r * r) * vNear; }   // round, soft`);
+  };
+  let last = null;
+  const api = {
+    U,
+    update(t, gust, c) {
+      const dt = last == null ? 0 : Math.min(0.1, Math.max(0, t - last)); last = t;
+      const v = 0.25 + 2.6 * gust;                                     // m/s along the wind
+      U.uDrift.value.addScaledVector(WIND, v * dt);
+      if (follow && c) U.uCentre.value.copy(c);
+    },
+  };
+  sceneryDrifts.push(api);
+  return api;
 }
 
 // ───────────── the flight: path + scroll timeline (all pure functions of the progress u) ─────────────
@@ -146,8 +192,10 @@ const PATH = [
 const path = createPath(PATH);
 // s = position along the path (0 perch .. 1 ledge). Flat at both ends: she stands still; PCHIP gives zero speed there, smooth in between.
 const KEYS = [
-  { u: 0.00, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.00, sweep: 0.0, legs: 0.00, tail: 0.50, fly: 0.00, stretch: 0.0, alert: 1.0, ground: 1.0, pitchBias: 0.00 },   // perched, wings folded
-  { u: 0.07, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.12, sweep: 0.0, legs: 0.00, tail: 0.55, fly: 0.00, stretch: 0.0, alert: 1.0, ground: 1.0, pitchBias: 0.00 },   // looks around, shifts the wings
+  { u: 0.00, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.00, sweep: 0.0, legs: +(Q.get('roost') ?? 1), tail: 0.40, fly: 0.00, stretch: 0.0, alert: 0.0, ground: 1.0, pitchBias: 0.00 },   // asleep on the peak, wings folded
+  { u: 0.05, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.00, sweep: 0.0, legs: +(Q.get('roost') ?? 1), tail: 0.40, fly: 0.00, stretch: 0.0, alert: 0.0, ground: 1.0, pitchBias: 0.00 },
+  { u: 0.09, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.16, sweep: 0.0, legs: 0.00, tail: 0.60, fly: 0.00, stretch: 0.0, alert: 0.5, ground: 1.0, pitchBias: 0.00 },   // awake: shakes her plumage out
+  { u: 0.105, s: 0.000, beats: 0.0, flap: 0.00, open: 0.10, sweep: 0.0, legs: 0.00, tail: 0.55, fly: 0.00, stretch: 0.0, alert: 1.0, ground: 1.0, pitchBias: 0.00 },   // looks around
   { u: 0.12, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.55, sweep: 0.0, legs: 0.00, tail: 0.70, fly: 0.25, stretch: 0.0, alert: 0.6, ground: 1.0, pitchBias: -0.28 },  // crouch: leans forward, wings half open
   { u: 0.155, s: 0.030, beats: 0.6, flap: 1.00, open: 1.00, sweep: 0.0, legs: 0.30, tail: 0.80, fly: 0.55, stretch: 0.2, alert: 0.5, ground: 0.0, pitchBias: 0.20 },  // the leap: first big stroke
   { u: 0.24, s: 0.130, beats: 5.5,  flap: 1.00, open: 1.00, sweep: 0.0, legs: 0.70, tail: 0.50, fly: 0.85, stretch: 0.4, alert: 0.5, ground: 0.0, pitchBias: 0.12 },  // climbing
@@ -161,11 +209,31 @@ const KEYS = [
   { u: 1.00, s: 1.000, beats: 21.8, flap: 0.00, open: 0.10, sweep: 0.0, legs: 0.00, tail: 0.50, fly: 0.00, stretch: 0.0, alert: 1.0, ground: 1.0, pitchBias: 0.00 },  // standing on the ledge
 ];
 const timeline = createTimeline(KEYS);
+// her life on the peak (u): asleep, the eyes open, the head rises, she shakes the feathers out; the wind on the plumage (strong on the
+// ground, mostly hidden by the airflow of the flight)
+const LIFE = createTimeline([
+  { u: 0.000, sleep: 1, eyes: 1, shake: 0, wind: 1.0, hug: 1 },
+  { u: 0.050, sleep: 1, eyes: 1, shake: 0, wind: 1.0, hug: 1 },
+  { u: 0.060, sleep: 0.9, eyes: 0, shake: 0, wind: 1.0, hug: 0.6 },     // the eyes open first ...
+  { u: 0.078, sleep: 0, eyes: 0, shake: 0, wind: 1.0, hug: 0.6 },       // ... then the head rises
+  { u: 0.084, sleep: 0, eyes: 0, shake: 1, wind: 1.0, hug: 0.6 },       // the shake
+  { u: 0.098, sleep: 0, eyes: 0, shake: 0, wind: 1.0, hug: 0.6 },
+  { u: 0.160, sleep: 0, eyes: 0, shake: 0, wind: 0.6, hug: 0 },
+  { u: 0.240, sleep: 0, eyes: 0, shake: 0, wind: 0.2, hug: 0 },
+  { u: 0.800, sleep: 0, eyes: 0, shake: 0, wind: 0.2, hug: 0 },
+  { u: 0.920, sleep: 0, eyes: 0, shake: 0, wind: 0.9, hug: 0 },
+  { u: 1.000, sleep: 0, eyes: 0, shake: 0, wind: 1.0, hug: 0.6 },
+]);
+// the wind of the scene (world): a sunset breeze across the peak, from her right to her left as the opening camera sees her
+const WIND = new THREE.Vector3(1, 0.04, 0.3).normalize();
+const WIND_GAIN = +(Q.get('wind') ?? 1);                 // ?wind=0 no wind on the plumage (A/B)
 const SECONDS = 40;                                        // the clock of the small life-motions over the whole scroll
 // camera, in the bird's heading frame (f forward, r right, up), keyed on u; tf/tu = where it looks (ahead of / above the bird)
 const CAM = createTimeline([
-  { u: 0.00, cf: 2.7, cr: 1.4,  cu: -0.45, tf: 0.0, tu: 0.25, fov: 34 },    // facing her on the peak, from a little below: she stands against the sky
-  { u: 0.08, cf: 2.2, cr: 2.2,  cu: -0.35, tf: 0.0, tu: 0.20, fov: 34 },
+  { u: 0.00, cf: 2.4, cr: 0.0,  cu: 0.28, tf: 0.0, tu: -0.06, fov: 30 },    // FRONT, centred, a little from above: she sleeps on the peak (a slow push-in)
+  { u: 0.05, cf: 2.05, cr: 0.0, cu: 0.24, tf: 0.0, tu: -0.04, fov: 30 },
+  { u: 0.085, cf: 2.6, cr: 0.35, cu: -0.20, tf: 0.0, tu: 0.14, fov: 31 },   // she wakes (still almost frontal)
+  { u: 0.11, cf: 2.1, cr: 1.8,  cu: -0.32, tf: 0.0, tu: 0.20, fov: 34 },    // the camera starts round to her side
   { u: 0.13, cf: 0.6, cr: 3.0,  cu: -0.10, tf: 0.6, tu: 0.20, fov: 36 },    // side, as she crouches
   { u: 0.20, cf: -1.0, cr: 3.2, cu: -0.10, tf: 1.2, tu: 0.30, fov: 40 },    // she leaps across the frame
   { u: 0.28, cf: -2.4, cr: 2.6, cu: -0.70, tf: 1.4, tu: 0.45, fov: 40 },    // from below and behind: she flies against the sky
@@ -196,39 +264,53 @@ if (LOOK) {
 }
 // how hot she burns along the scene (u): calm on the peak, a burst at the leap, full in flight, a flare when she brakes
 const HEAT = createTimeline([
-  { u: 0.00, h: 0.55 }, { u: 0.10, h: 0.65 }, { u: 0.13, h: 0.95 }, { u: 0.16, h: 1.45 }, { u: 0.24, h: 1.15 }, { u: 0.40, h: 1.0 },
+  { u: 0.00, h: 0.42 }, { u: 0.05, h: 0.42 }, { u: 0.08, h: 0.58 }, { u: 0.10, h: 0.68 }, { u: 0.13, h: 0.95 }, { u: 0.16, h: 1.45 }, { u: 0.24, h: 1.15 }, { u: 0.40, h: 1.0 },
   { u: 0.60, h: 0.95 }, { u: 0.80, h: 1.05 }, { u: 0.87, h: 1.35 }, { u: 0.93, h: 0.95 }, { u: 1.00, h: 0.6 },
 ]);
 const EMBER_RATE = (h) => Math.min(1, Math.max(0.15, (h - 0.3) * 1.1));
 let heatNow = 1;
 const feet = ['Bone_002', 'Bone_009'].map((nm) => flight.bones[flight.byName.get(nm)]);
-const FOOT_MARGIN = 0.012, V = new THREE.Vector3();
+const SETTLE = +(Q.get('settle') ?? 0.2), FOOT_MARGIN = 0.012, V = new THREE.Vector3();
 
 // ───────────── one frame of the scene as a function of u ─────────────
 const qGround = new THREE.Quaternion(), qAir = new THREE.Quaternion(), fwdH = new THREE.Vector3(), Z = new THREE.Vector3(0, 0, -1);
 const heading = (b) => { fwdH.set(b.fwd.x, 0, b.fwd.z); if (fwdH.lengthSq() < 1e-6) fwdH.set(0, 0, -1); return fwdH.normalize(); };
 let plants = null;
 function feetXZ() { bird.updateMatrixWorld(true); let x = 0, z = 0; for (const f of feet) { f.getWorldPosition(V); x += V.x / feet.length; z += V.z / feet.length; } return [x, z]; }
+let life = { sleep: 0, eyes: 0, shake: 0, wind: 0 };
+// The clock of her LIFE (breathing, wind, gaze, blinks, feather flutter) is the wall clock: she keeps breathing and the wind keeps
+// blowing while the scroll rests (the opening is a still frame until the visitor scrolls). The STORY (pose, path, camera) is u.
+let lifeT = performance.now() / 1000;
+const windM = new THREE.Vector3(), qModel = new THREE.Quaternion();
 function place(u, usePlants = true) {
-  if (usePlants && !plants) plants = { start: (place(0, false), feetXZ()), end: (place(KEYS[10].u, false), feetXZ()) };   // where the feet touch, once
+  if (usePlants && !plants) plants = { start: (place(0, false), feetXZ()), end: (place(KEYS.find((k) => k.ground === 1 && k.u > 0.5).u, false), feetXZ()) };   // where the feet touch, once
   const k = timeline.at(u), s = Math.min(1, Math.max(0, k.s)), b = path.at(s);
   // orientation: in the air the path's (pitch + bank); on the ground level, facing where it is heading
   qGround.setFromUnitVectors(Z, heading(b)); qAir.copy(b.quat);
   bird.position.copy(b.pos); bird.quaternion.copy(qGround).slerp(qAir, 1 - k.ground);
   bird.rotateX(k.pitchBias);
+  // the wind in the model's frame (the pose works there): through the inverse of the model's world rotation
+  qModel.copy(bird.quaternion).multiply(holder.quaternion).multiply(model.quaternion).invert(); windM.copy(WIND).applyQuaternion(qModel);
+  const lf = LIFE.at(u);
+  life = lf;
   const P = {
-    t: u * SECONDS, phase: k.beats, flap: k.flap, open: k.open, sweep: k.sweep, legs: k.legs, tail: k.tail, fly: k.fly, stretch: k.stretch, alert: k.alert,
+    sleep: lf.sleep, shake: lf.shake, shakePh: u * 300, wind: lf.wind * WIND_GAIN, hug: lf.hug, windX: windM.x, windY: windM.y, windZ: windM.z,
+    t: lifeT, phase: k.beats, flap: k.flap, open: k.open, sweep: k.sweep, legs: k.legs, tail: k.tail, fly: k.fly, stretch: k.stretch, alert: k.alert,
     bank: b.bank * (1 - k.ground), pitch: b.pitch * (1 - k.ground) + k.pitchBias, pitchRate: b.pitchRate * 0.08 * (1 - k.ground), yawRate: b.yawRate * 0.08 * (1 - k.ground),
     lookYaw: Math.max(-0.5, Math.min(0.5, b.yawRate * 0.04)) * (1 - k.ground), lookPitch: 0, load: Math.max(-1, Math.min(1, b.pitchRate * 0.1)) * (1 - k.ground),
   };
   flight.pose(P);
-  eyes.set(blinkAt(P.t));
-  heatNow = HEAT.at(u).h * (1 + 0.12 * k.flap * Math.max(0, Math.sin(k.beats * TAU)));   // each downstroke fans the fire
+  eyes.set(Math.max(blinkAt(P.t), lf.eyes));
+  heatNow = HEAT.at(u).h * (1 + 0.12 * k.flap * Math.max(0, Math.sin(k.beats * TAU)))    // each downstroke fans the fire
+          * (1 + 0.10 * lf.sleep * breathAt(P.t));                                        // asleep, the embers glow with her breath
   if (k.ground > 0.001) {                                              // feet on the terrain
     bird.updateMatrixWorld(true);
     // the lowest foot (relative to the ground under it) touches; the other may be a little above
     let low = Infinity; for (const f of feet) { f.getWorldPosition(V); low = Math.min(low, V.y - heightAt(V.x, V.z)); }
     bird.position.y += k.ground * (FOOT_MARGIN - low);
+    // asleep she SETTLES: the belly rests on the summit (measured: 0.13 above it with the legs folded; 0.2 hides the folded legs from the front camera), the folded feet go into the rock
+    // under the breast feathers, so she reads as a roosting bird and not one standing on bent legs
+    bird.position.y -= SETTLE * lf.sleep * k.ground;
     if (usePlants && k.ground > 0.5) {                                // planted feet: they stay where they touched down
       const pl = u < 0.5 ? plants.start : plants.end, w = THREE.MathUtils.smoothstep(k.ground, 0.5, 1.0), f = feetXZ();
       bird.position.x += w * (pl[0] - f[0]); bird.position.z += w * (pl[1] - f[1]);
@@ -277,12 +359,17 @@ if (Q.has('u')) requestAnimationFrame(() => lenis.scrollTo(u * lenis.limit, { im
 if (Q.get('play') === '1') requestAnimationFrame(() => setPlay(true));
 function draw(time) {
   if (!post) { renderer.render(scene, camera); return; }
-  look.update({ time, heat: heatNow, camera, sunDir: SUN_DIR, blink: blinkAt(u * SECONDS) });
-  embers.update(time, EMBER_RATE(heatNow));
+  look.update({ time, heat: heatNow, camera, sunDir: SUN_DIR, blink: Math.max(blinkAt(lifeT), life.eyes),
+    breath: breathAt(lifeT) * (0.35 + 0.65 * life.sleep), wind: life.wind * WIND_GAIN * (0.5 + 0.5 * gustAt(time, 0)) });
+  const gw = gustAt(time, 0) * life.wind;
+  embers.update(time, EMBER_RATE(heatNow), { x: WIND.x * (0.08 + 0.45 * gw), z: WIND.z * (0.08 + 0.45 * gw) });
   embers.setPixelScale(renderer.getDrawingBufferSize(BUF).y, camera.fov);
   // the flames: almost none while she rests (she smoulders), they catch when she leaps and settle again on the ledge
   post.aura.uniforms.uIntensity.value = 0.85 * Math.min(1.3, Math.max(0, (heatNow - 0.5) / 0.55));
   post.aura.uniforms.uHeight.value = 0.07 + 0.11 * Math.min(1.4, heatNow);           // calm licks when perched, tall in flight
+  camRight.setFromMatrixColumn(camera.matrixWorld, 0);
+  post.aura.uniforms.uLean.value = WIND.dot(camRight) * (0.25 + 0.45 * gw) * life.wind * WIND_GAIN;   // the licks lean downwind
+  for (const d of sceneryDrifts) d.update(time, gw * Math.max(0.3, life.wind) * WIND_GAIN, bird.position);
   post.render(time);
 }
 // quality governor: start at the best tier and step down while frames run long (a frame over 18 ms with vsync = a missed one).
@@ -306,6 +393,7 @@ function governor(dt) {
   } else if (slow > 0.1 || ++govClean >= 3) govOn = false;      // at the floor, or settled after three clean windows
 }
 function frame(now) {
+  lifeT = now / 1000;
   governor(now - last);
   last = now;
   lenis.raf(now);
@@ -326,6 +414,6 @@ requestAnimationFrame(frame);
 
 // QA hooks
 window.__op = { THREE, scene, camera, bird, flight, path, timeline, heightAt, PATH, skinned,
-  setU(uu, time = performance.now() / 1000) { hold = true; u = uu; const r = place(uu); placeCamera(uu, r.b); shadowFollow(); draw(time); return r; },
+  setU(uu, time = performance.now() / 1000) { hold = true; u = uu; lifeT = time; const r = place(uu); placeCamera(uu, r.b); shadowFollow(); draw(time); return r; },
   render: (time = performance.now() / 1000) => draw(time), renderer, get post() { return post; }, get look() { return look; }, get embers() { return embers; },
   get tier() { return tier; }, ready: true };

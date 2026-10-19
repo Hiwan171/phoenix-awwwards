@@ -159,6 +159,27 @@ sozinho.** Estado: **dragão e fênix prontos**; tigre e tartaruga aguardam. Tud
   - Flags: `?look=0` (cru, A/B), `?aura=0`, `?bloom=0`, `?msaa=N` (fixa, sem governador), `?scale=`, `?steps=`, `?embers=N`,
     `?bs=`/`?bt=` (força/limiar do bloom), `?sky=` (ganho do céu). QA: `__op.look.set({...})`, `__op.render(t)`, `__op.tier`.
 
+- **Abertura: a fênix adormecida, de frente, e o vento (19/10/2026).** Novos parâmetros do controlador (`fenix-flight.js`):
+  - `P.sleep`: o pescoço dobra em S (`SLEEP_THETA`: a base recua para os ombros, o meio vai à frente, a cabeça AFUNDA ~0,17 com
+    40° de inclinação), sem olhar, crista deitada, respiração funda (`breathAt`). Curvar a cabeça além de ~50° põe a crista
+    grande (parte rígida da malha da cabeça) em pé, como um moicano. Inclinar o pescoço para frente só leva a cabeça para frente,
+    porque o pescoço é quase vertical em repouso.
+  - `P.wind` + `windX/Y/Z` (no referencial do MODELO): rajadas (`gustAt`) que atravessam o corpo a favor do vento; cada cadeia
+    (penas da cauda, crista, costas, raízes da cauda e, pouco, a asa dobrada) dobra na direção do vento e tremula, mais na ponta.
+    Medido: variação das pontas da cauda 2,6 → 6,6 cm; arestas esticadas só +0,06 % (cauda). Pose com vento: 0,9 ms.
+  - `P.shake` / `P.shakePh`: a sacudida de penas ao acordar (a fase vem do scroll, como a batida: não treme para sempre se o
+    scroll parar ali). `P.hug`: asas coladas ao corpo (de frente a dobra normal as deixava abertas como braços).
+  - No shader (`fenix-look.js`, antes do skinning): o peito infla com a respiração e as bordas das penas tremulam com o vento.
+  - Cena: `LIFE` (sleep, eyes, shake, wind, hug) keyed em u. Dormindo, as pernas dobram (`legs 1`) e o corpo ASSENTA 0,2 no
+    topo (`SETTLE`), senão de frente ela parece em pé sobre pernas dobradas. Câmera de frente, centralizada, levemente de cima
+    (o vale escuro atrás dá contraste ao brilho), com push-in lento; ela acorda (olhos → cabeça → de pé → sacode → olha) e a
+    câmera gira para o lado no agachamento.
+  - **O relógio da VIDA (respiração, vento, olhar, piscar, tremulação) agora é o relógio real** (`lifeT`): na abertura ninguém
+    rolou ainda, e com `u × SECONDS` ela ficaria congelada. A HISTÓRIA (pose, caminho, câmera) continua em u, reversível.
+  - Vento visível: cinzas finas numa caixa que segue a ave (redondas; as coladas na lente são descartadas, senão viram um
+    quadrado grande), as brasas do cenário derivam, as faíscas e as chamas da aura (`uLean` em `FLAME_FRAG`) se inclinam.
+  - Flags: `?wind=0` (sem vento nas penas), `?roost=`, `?settle=`.
+
 ### Performance — o que medimos (Intel UHD 620 / i5-10210U, 1080p; vale para as novas feras)
 - **Resultado:** o hero com a fênix foi de **19,5 → 38,8 fps** (A/B intercalado, vsync ligado) com visual equivalente
   (diff de pixels: corpo PSNR 61–71 dB; chamas estatisticamente iguais), e o governador leva a ~55–60 fps nos tiers altos.

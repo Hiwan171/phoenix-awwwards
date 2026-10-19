@@ -30,6 +30,7 @@ float fbm4(vec2 p){ return fbm3(p) + 0.0625 * vn(p * 8.27 + vec2(7.7, 3.3)); }
 export const FLAME_FRAG = /* glsl */`
 uniform sampler2D tMask;
 uniform float uTime, uIntensity, uHeight, uWarp, uAspect, uSteps, uDensity, uDebug;
+uniform float uLean;                                 // wind: the tongues lean sideways (screen x per unit of flame height, + = right)
 varying vec2 vUv;
 ${NOISE_GLSL}
 float h21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
@@ -66,6 +67,7 @@ void main() {
     vec2 p = vUv;
     p.x += (sway * 0.50 + braid * 0.18) * uWarp * (0.15 + k);
     p.y -= k * H;
+    p.x -= k * H * uLean / uAspect;                  // leaning right: the source of this pixel is down and to the LEFT
     float w = pow(max(1.0 - k, 0.0), 1.15);          // k can land a hair above 1: pow(<0) is NaN
     cov += texture2D(tMask, p).r * w; wsum += w;
   }
@@ -157,7 +159,7 @@ export function createFlameAura({ renderer, scene, camera, composer, objects, sc
     tMask: { value: maskRT.texture }, tNoise: { value: noise },
     uTime: { value: 0 }, uIntensity: { value: params.intensity ?? 1.0 }, uHeight: { value: params.height ?? 0.36 },
     uWarp: { value: params.warp ?? 1.0 }, uAspect: { value: innerWidth / innerHeight },
-    uSteps: { value: params.steps ?? 20 }, uDensity: { value: params.density ?? 1.0 }, uDebug: { value: params.debug ?? 0 },
+    uSteps: { value: params.steps ?? 20 }, uDensity: { value: params.density ?? 1.0 }, uDebug: { value: params.debug ?? 0 }, uLean: { value: params.lean ?? 0 },
   };
   const flameMat = new THREE.ShaderMaterial({ uniforms: flameUniforms, vertexShader: QUAD_VERT, fragmentShader: FLAME_FRAG, depthTest: false, depthWrite: false });
   const flameQuad = new FullScreenQuad(flameMat);
