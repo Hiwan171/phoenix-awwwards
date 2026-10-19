@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="google" content="notranslate">
+<title>Opening lab</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; background: #120c10; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; color: #e9dfcf; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  #spacer { height: 1000vh; }
+  #hud { position: fixed; right: 12px; bottom: 10px; text-align: right; color: #cdbfae; white-space: pre; text-shadow: 0 1px 2px #000; }
+  #hint { position: fixed; left: 12px; bottom: 10px; color: #cdbfae; text-shadow: 0 1px 2px #000; }
+  #bar { position: fixed; left: 0; top: 0; height: 2px; background: #f2a43a; width: 0; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="spacer"></div>
+<div id="bar"></div>
+<div id="hud"></div>
+<div id="hint">scroll: the phoenix takes off from the peak and lands on the far ledge · scroll back to rewind · Space auto-play · C free camera (drag) · H hides the UI</div>
+<script type="module" src="/src/opening-lab.js"></script>
+</body>
+</html>

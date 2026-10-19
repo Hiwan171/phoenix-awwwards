@@ -1,0 +1,238 @@
+// Dev-only test of the OPENING scene: the phoenix stands with folded wings on a mountain peak, crouches, leaps, flies over the valley
+// and lands on a ledge on the other side, all driven by the scroll (scroll back = rewind). The scenery is a placeholder (procedural
+// mountains + a dusk sky shader), only to judge the choreography and the camera; the real habitat shader comes later.
+//   /opening-lab.html          ?m=lite  lite model        ?u=0.3 start at a progress        ?ui=0 no text
+import * as THREE from 'three';
+import Lenis from 'lenis';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { createFenixFlight } from './beasts/fenix-flight.js';
+import { createPath, createTimeline } from './beasts/flight-path.js';
+import { applyEyes, blinkAt } from './beasts/fenix-eyes.js';
+
+const Q = new URLSearchParams(location.search);
+const $ = (id) => document.getElementById(id);
+const TAU = Math.PI * 2;
+
+// ───────────── renderer, light ─────────────
+const renderer = new THREE.WebGLRenderer({ canvas: $('gl'), antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+const HORIZON = new THREE.Color('#d9774a'), ZENITH = new THREE.Color('#1d1a33'), FOG = new THREE.Color('#6e3b40');
+scene.fog = new THREE.FogExp2(FOG, 0.0075);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture; scene.environmentIntensity = 0.35;
+const SUN_DIR = new THREE.Vector3(-0.55, 0.22, -0.8).normalize();
+const sun = new THREE.DirectionalLight(0xffc48a, 3.2); sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024); sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 40; sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.02;
+Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4 });
+scene.add(sun, sun.target);
+scene.add(new THREE.HemisphereLight(0xffb48a, 0x2a1820, 0.9));
+const camera = new THREE.PerspectiveCamera(38, 1, 0.05, 600);
+function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+
+// ───────────── sky: a gradient dome with the setting sun ─────────────
+{
+  const mat = new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    uniforms: { uH: { value: HORIZON }, uZ: { value: ZENITH }, uSun: { value: SUN_DIR } },
+    vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `uniform vec3 uH, uZ, uSun; varying vec3 vD;
+      void main(){
+        float h = clamp(vD.y, -0.2, 1.0);
+        vec3 c = mix(uH, uZ, pow(max(h, 0.0), 0.55));
+        c = mix(c, uH * 0.55, smoothstep(0.0, -0.2, h));                 // below the horizon: the haze of the valleys
+        float s = max(dot(normalize(vD), uSun), 0.0);
+        c += vec3(1.0, 0.62, 0.32) * (pow(s, 6.0) * 0.55 + pow(s, 80.0) * 1.2) + vec3(1.0, 0.9, 0.7) * smoothstep(0.9993, 0.9997, s) * 3.0;
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+  });
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 48, 24), mat); sky.renderOrder = -1; scene.add(sky);
+}
+
+// ───────────── terrain: a heightfield known in JS (the feet stand on it) ─────────────
+const PEAK = { x: 0, z: 0, top: 13.0 }, LEDGE = { x: -12, z: -40, top: 7.0 };
+const hash = (x, y) => { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); };
+const vnoise = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1); return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v; };
+const ridged = (x, y) => { let s = 0, amp = 0.5, f = 1; for (let i = 0; i < 5; i++) { const n = 1 - Math.abs(vnoise(x * f, y * f) * 2 - 1); s += n * n * amp; amp *= 0.5; f *= 2.07; } return s; };
+function mountain(x, z, m, r, sharp) { const d = Math.hypot(x - m.x, z - m.z) / r; return Math.exp(-Math.pow(d, sharp)); }
+const smin = (a, b, k) => { const h = Math.max(0, Math.min(1, 0.5 + 0.5 * (b - a) / k)); return b + (a - b) * h - k * h * (1 - h); };   // smooth min (rounded summit)
+function heightAt(x, z) {
+  let h = 1.6 * ridged(x * 0.035 + 3.1, z * 0.035 - 1.7) + 0.5 * vnoise(x * 0.25, z * 0.25);
+  // the perch: a steep rocky spire with a rounded, rough summit (not a table)
+  const p = mountain(x, z, PEAK, 4.2, 1.05), crag = ridged(x * 0.35 + 7, z * 0.35 - 2);
+  h = Math.max(h, smin(PEAK.top * 1.08 * p + 1.6 * crag * p, PEAK.top + 0.3 * vnoise(x * 3, z * 3), 0.6));
+  // the landing ledge across the valley: a broader crag
+  const l = mountain(x, z, LEDGE, 6.0, 1.3), crag2 = ridged(x * 0.3 + 5, z * 0.3);
+  h = Math.max(h, smin(LEDGE.top * 1.1 * l + 1.4 * crag2 * l, LEDGE.top + 0.25 * vnoise(x * 3 + 9, z * 3), 0.6));
+  // far ranges all around, for a horizon
+  const ring = Math.hypot(x + 6, z + 20);
+  h += Math.max(0, ring - 50) * 0.16 * (0.5 + ridged(x * 0.05, z * 0.05));      // lower than the perch: from up there she looks DOWN on the world
+  return h;
+}
+{
+  const SIZE = 180, SEG = 260, geo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG); geo.rotateX(-Math.PI / 2); geo.translate(-6, 0, -20);
+  const pos = geo.attributes.position, col = new Float32Array(pos.count * 3), c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) pos.setY(i, heightAt(pos.getX(i), pos.getZ(i)));
+  geo.computeVertexNormals();
+  const nrm = geo.attributes.normal, low = new THREE.Color('#1c1218'), rock = new THREE.Color('#3e2420'), lit = new THREE.Color('#7a3e2c'), top = new THREE.Color('#9a6448');
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i), slope = 1 - nrm.getY(i);
+    c.copy(low).lerp(rock, THREE.MathUtils.smoothstep(y, 0.5, 5)).lerp(lit, THREE.MathUtils.smoothstep(y, 5, 11) * 0.7).lerp(top, THREE.MathUtils.smoothstep(y, 9, 13.5) * 0.6);
+    c.multiplyScalar(0.75 + 0.5 * vnoise(pos.getX(i) * 0.6, pos.getZ(i) * 0.6));
+    col.set([c.r, c.g, c.b], i * 3);
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const terrain = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }));
+  terrain.receiveShadow = true; scene.add(terrain);
+}
+// drifting embers in the air (cheap points), for scale and depth
+{
+  const N = 900, g = new THREE.BufferGeometry(), p = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) { p[i*3] = (hash(i, 1) - 0.5) * 70 - 6; p[i*3+1] = 3 + hash(i, 2) * 16; p[i*3+2] = (hash(i, 3) - 0.5) * 70 - 20; }
+  g.setAttribute('position', new THREE.BufferAttribute(p, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffa060, size: 0.06, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending })));
+}
+
+// ───────────── the flight: path + scroll timeline (all pure functions of the progress u) ─────────────
+const Hp = PEAK.top, L = LEDGE.top;
+const PATH = [
+  [0, Hp + 0.5, 0],            // 0 perched (the bird's centre is ~0.5 above its feet)
+  [0, Hp + 1.4, -2.6],         // 1 the leap: up and out
+  [1.6, Hp + 2.7, -7],         // 2 climbing
+  [5, Hp + 3.3, -14],          // 3 over the valley
+  [6.2, Hp + 2.6, -22],        // 4 soaring, turning left
+  [2.5, Hp + 0.8, -29],        // 5 gliding down
+  [-5, Hp - 1.2, -34],         // 6
+  [-10.5, L + 2.2, -37],       // 7 approach
+  [-11.8, L + 0.95, -39.1],    // 8 flare
+  [-12, L + 0.5, -40],         // 9 touchdown
+];
+const path = createPath(PATH);
+// s = position along the path (0 perch .. 1 ledge). Flat at both ends: she stands still; PCHIP gives zero speed there, smooth in between.
+const KEYS = [
+  { u: 0.00, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.00, sweep: 0.0, legs: 0.00, tail: 0.50, fly: 0.00, stretch: 0.0, alert: 1.0, ground: 1.0, pitchBias: 0.00 },   // perched, wings folded
+  { u: 0.07, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.12, sweep: 0.0, legs: 0.00, tail: 0.55, fly: 0.00, stretch: 0.0, alert: 1.0, ground: 1.0, pitchBias: 0.00 },   // looks around, shifts the wings
+  { u: 0.12, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.55, sweep: 0.0, legs: 0.00, tail: 0.70, fly: 0.25, stretch: 0.0, alert: 0.6, ground: 1.0, pitchBias: -0.28 },  // crouch: leans forward, wings half open
+  { u: 0.155, s: 0.030, beats: 0.6, flap: 1.00, open: 1.00, sweep: 0.0, legs: 0.30, tail: 0.80, fly: 0.55, stretch: 0.2, alert: 0.5, ground: 0.0, pitchBias: 0.20 },  // the leap: first big stroke
+  { u: 0.24, s: 0.130, beats: 5.5,  flap: 1.00, open: 1.00, sweep: 0.0, legs: 0.70, tail: 0.50, fly: 0.85, stretch: 0.4, alert: 0.5, ground: 0.0, pitchBias: 0.12 },  // climbing
+  { u: 0.40, s: 0.400, beats: 11.0, flap: 0.20, open: 1.00, sweep: 0.0, legs: 0.90, tail: 0.75, fly: 1.00, stretch: 1.0, alert: 0.8, ground: 0.0, pitchBias: 0.00 },  // soaring over the valley
+  { u: 0.56, s: 0.630, beats: 12.0, flap: 0.05, open: 1.00, sweep: 0.1, legs: 0.90, tail: 0.85, fly: 1.00, stretch: 1.0, alert: 0.9, ground: 0.0, pitchBias: 0.00 },  // gliding, turning
+  { u: 0.70, s: 0.800, beats: 14.0, flap: 0.35, open: 1.00, sweep: 0.0, legs: 0.70, tail: 0.80, fly: 0.95, stretch: 0.7, alert: 0.7, ground: 0.0, pitchBias: 0.04 },  // descending
+  { u: 0.81, s: 0.930, beats: 17.0, flap: 0.80, open: 1.00, sweep: 0.0, legs: -0.40, tail: 1.00, fly: 0.55, stretch: 0.2, alert: 0.7, ground: 0.0, pitchBias: 0.15 }, // approach: legs reach forward
+  { u: 0.87, s: 0.990, beats: 20.0, flap: 1.00, open: 1.00, sweep: 0.0, legs: -1.00, tail: 1.00, fly: 0.25, stretch: 0.0, alert: 0.6, ground: 0.20, pitchBias: 0.55 }, // flare: braking strokes
+  { u: 0.905, s: 1.000, beats: 21.2, flap: 0.35, open: 1.00, sweep: 0.0, legs: -0.60, tail: 0.80, fly: 0.10, stretch: 0.0, alert: 0.9, ground: 1.0, pitchBias: 0.25 }, // touchdown
+  { u: 0.95, s: 1.000, beats: 21.6, flap: 0.10, open: 0.45, sweep: 0.2, legs: 0.00, tail: 0.55, fly: 0.00, stretch: 0.0, alert: 1.0, ground: 1.0, pitchBias: 0.00 },  // wings come in
+  { u: 1.00, s: 1.000, beats: 21.8, flap: 0.00, open: 0.10, sweep: 0.0, legs: 0.00, tail: 0.50, fly: 0.00, stretch: 0.0, alert: 1.0, ground: 1.0, pitchBias: 0.00 },  // standing on the ledge
+];
+const timeline = createTimeline(KEYS);
+const SECONDS = 40;                                        // the clock of the small life-motions over the whole scroll
+// camera, in the bird's heading frame (f forward, r right, up), keyed on u; tf/tu = where it looks (ahead of / above the bird)
+const CAM = createTimeline([
+  { u: 0.00, cf: 2.7, cr: 1.4,  cu: -0.45, tf: 0.0, tu: 0.25, fov: 34 },    // facing her on the peak, from a little below: she stands against the sky
+  { u: 0.08, cf: 2.2, cr: 2.2,  cu: -0.35, tf: 0.0, tu: 0.20, fov: 34 },
+  { u: 0.13, cf: 0.6, cr: 3.0,  cu: -0.10, tf: 0.6, tu: 0.20, fov: 36 },    // side, as she crouches
+  { u: 0.20, cf: -1.2, cr: 3.6, cu: 0.30, tf: 1.5, tu: 0.10, fov: 40 },     // she leaps across the frame
+  { u: 0.32, cf: -3.6, cr: 3.2, cu: 0.60, tf: 2.0, tu: -0.30, fov: 42 },    // behind and above: the drop below her
+  { u: 0.46, cf: -4.2, cr: 3.8, cu: 1.40, tf: 2.5, tu: -0.60, fov: 44 },    // the valley below
+  { u: 0.62, cf: -3.2, cr: -4.0, cu: 0.40, tf: 2.0, tu: -0.20, fov: 42 },   // swing to the other side, lower
+  { u: 0.76, cf: -0.8, cr: -4.2, cu: -0.10, tf: 1.5, tu: 0.10, fov: 40 },
+  { u: 0.86, cf: 2.0, cr: -3.2, cu: -0.20, tf: 0.5, tu: 0.20, fov: 37 },    // landing seen from the front-side
+  { u: 1.00, cf: 2.8, cr: -1.5, cu: -0.35, tf: 0.0, tu: 0.25, fov: 34 },
+]);
+
+// ───────────── the phoenix ─────────────
+const variant = Q.get('m') === 'lite' ? 'lite' : 'web';
+const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(`/models/fenix-flight-${variant}.glb`);
+const model = gltf.scene;
+let skinned = null;
+model.traverse((o) => { if (o.isMesh || o.isSkinnedMesh) { o.frustumCulled = false; o.castShadow = true; if (o.isSkinnedMesh) skinned = o; if (o.material) { o.material.envMap = scene.environment; o.material.envMapIntensity = 0.45; o.material.metalness = 0.35; } } });
+const holder = new THREE.Group(); holder.rotation.y = -Math.PI / 2; holder.scale.setScalar(1 / 1.7); holder.position.y = -0.85 / 1.7; holder.add(model);
+const bird = new THREE.Group(); bird.add(holder); scene.add(bird);
+const flight = createFenixFlight(model);
+const eyes = applyEyes(skinned.material);
+const feet = ['Bone_002', 'Bone_009'].map((nm) => flight.bones[flight.byName.get(nm)]);
+const FOOT_MARGIN = 0.012, V = new THREE.Vector3();
+
+// ───────────── one frame of the scene as a function of u ─────────────
+const qGround = new THREE.Quaternion(), qAir = new THREE.Quaternion(), fwdH = new THREE.Vector3(), Z = new THREE.Vector3(0, 0, -1);
+const heading = (b) => { fwdH.set(b.fwd.x, 0, b.fwd.z); if (fwdH.lengthSq() < 1e-6) fwdH.set(0, 0, -1); return fwdH.normalize(); };
+let plants = null;
+function feetXZ() { bird.updateMatrixWorld(true); let x = 0, z = 0; for (const f of feet) { f.getWorldPosition(V); x += V.x / feet.length; z += V.z / feet.length; } return [x, z]; }
+function place(u, usePlants = true) {
+  if (usePlants && !plants) plants = { start: (place(0, false), feetXZ()), end: (place(KEYS[10].u, false), feetXZ()) };   // where the feet touch, once
+  const k = timeline.at(u), s = Math.min(1, Math.max(0, k.s)), b = path.at(s);
+  // orientation: in the air the path's (pitch + bank); on the ground level, facing where it is heading
+  qGround.setFromUnitVectors(Z, heading(b)); qAir.copy(b.quat);
+  bird.position.copy(b.pos); bird.quaternion.copy(qGround).slerp(qAir, 1 - k.ground);
+  bird.rotateX(k.pitchBias);
+  const P = {
+    t: u * SECONDS, phase: k.beats, flap: k.flap, open: k.open, sweep: k.sweep, legs: k.legs, tail: k.tail, fly: k.fly, stretch: k.stretch, alert: k.alert,
+    bank: b.bank * (1 - k.ground), pitch: b.pitch * (1 - k.ground) + k.pitchBias, pitchRate: b.pitchRate * 0.08 * (1 - k.ground), yawRate: b.yawRate * 0.08 * (1 - k.ground),
+    lookYaw: Math.max(-0.5, Math.min(0.5, b.yawRate * 0.04)) * (1 - k.ground), lookPitch: 0, load: Math.max(-1, Math.min(1, b.pitchRate * 0.1)) * (1 - k.ground),
+  };
+  flight.pose(P);
+  eyes.set(blinkAt(P.t));
+  if (k.ground > 0.001) {                                              // feet on the terrain
+    bird.updateMatrixWorld(true);
+    // the lowest foot (relative to the ground under it) touches; the other may be a little above
+    let low = Infinity; for (const f of feet) { f.getWorldPosition(V); low = Math.min(low, V.y - heightAt(V.x, V.z)); }
+    bird.position.y += k.ground * (FOOT_MARGIN - low);
+    if (usePlants && k.ground > 0.5) {                                // planted feet: they stay where they touched down
+      const pl = u < 0.5 ? plants.start : plants.end, w = THREE.MathUtils.smoothstep(k.ground, 0.5, 1.0), f = feetXZ();
+      bird.position.x += w * (pl[0] - f[0]); bird.position.z += w * (pl[1] - f[1]);
+    }
+  }
+  return { k, b, P };
+}
+
+// ───────────── camera ─────────────
+const controls = new OrbitControls(camera, renderer.domElement); controls.enabled = false; controls.enableDamping = true;
+let freeCam = false;
+const camPos = new THREE.Vector3(), camTgt = new THREE.Vector3(), R = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0);
+function placeCamera(u, b) {
+  if (freeCam) { controls.target.copy(bird.position); controls.update(); return; }
+  const c = CAM.at(u), f = heading(b); R.crossVectors(f, UP).normalize();
+  camPos.copy(bird.position).addScaledVector(f, c.cf).addScaledVector(R, c.cr).addScaledVector(UP, c.cu);
+  camPos.y = Math.max(camPos.y, heightAt(camPos.x, camPos.z) + 0.5);  // never inside the mountain
+  camTgt.copy(bird.position).addScaledVector(f, c.tf).addScaledVector(UP, c.tu);
+  camera.position.copy(camPos); camera.lookAt(camTgt);
+  if (Math.abs(camera.fov - c.fov) > 0.01) { camera.fov = c.fov; camera.updateProjectionMatrix(); }
+}
+function shadowFollow() { sun.position.copy(bird.position).addScaledVector(SUN_DIR, 20); sun.target.position.copy(bird.position); sun.target.updateMatrixWorld(); }
+
+// ───────────── scroll, UI, loop ─────────────
+const lenis = new Lenis({ lerp: 0.08 });
+let u = +(Q.get('u') ?? 0), autoplay = false, hold = false, last = performance.now();
+const toggleUI = () => { for (const id of ['hud', 'hint', 'bar']) { const el = $(id); el.style.display = el.style.display === 'none' ? '' : 'none'; } };
+if (Q.get('ui') === '0') toggleUI();
+addEventListener('keydown', (e) => {
+  if (e.code === 'Space') { e.preventDefault(); autoplay = !autoplay; }
+  if (e.code === 'KeyH') toggleUI();
+  if (e.code === 'KeyC') { freeCam = !freeCam; controls.enabled = freeCam; if (freeCam) controls.target.copy(bird.position); }
+});
+if (Q.has('u')) requestAnimationFrame(() => lenis.scrollTo(u * lenis.limit, { immediate: true }));
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  lenis.raf(now);
+  if (!hold) {
+    if (autoplay) { u = Math.min(1, u + dt / 45); if (u >= 1) autoplay = false; lenis.scrollTo(u * lenis.limit, { immediate: true }); }
+    else u = Math.min(1, Math.max(0, lenis.limit ? lenis.scroll / lenis.limit : 0));
+    const r = place(u); placeCamera(u, r.b); shadowFollow();
+    $('bar').style.width = (u * 100).toFixed(2) + '%';
+    $('hud').textContent = `u ${u.toFixed(3)}   ${u < 0.13 ? 'perched' : u < 0.16 ? 'leap' : u < 0.81 ? 'flight' : u < 0.905 ? 'landing' : 'on the ledge'}`;
+  }
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// QA hooks
+window.__op = { THREE, scene, camera, bird, flight, path, timeline, heightAt, PATH, skinned,
+  setU(uu) { hold = true; u = uu; const r = place(uu); placeCamera(uu, r.b); shadowFollow(); renderer.render(scene, camera); return r; },
+  ready: true };

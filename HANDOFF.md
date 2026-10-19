@@ -128,6 +128,14 @@ sozinho.** Estado: **dragão e fênix prontos**; tigre e tartaruga aguardam. Tud
   corpo na horizontal, pescoço à frente, cabeça nivelada) e `P.stretch`; a linha do tempo da demo os dirige. O laboratório carrega
   `fenix-flight-{web,lite}.glb` (3,65 / 1,63 MB); o hero continua com `fenix-meshy-*.glb` e o clipe Hover até religarmos.
 
+- **Teste da cena de abertura (19/10/2026): `http://localhost:5173/opening-lab.html`.** A fênix parada de asas fechadas num pico,
+  agacha, pula, sobrevoa um vale e pousa numa saliência do outro lado, tudo pelo scroll (para trás desfaz). Cenário PROVISÓRIO
+  (montanhas procedurais com alturas conhecidas em JS, céu de entardecer em shader, névoa, brasas no ar) só para julgar a
+  coreografia e a câmera. `site/src/opening-lab.js`: caminho de 10 pontos, linha do tempo com canal `s` (posição no caminho, plana
+  nas pontas = ela parada), pés plantados no terreno no pico e no pouso, orientação nivelada no chão, câmera cinematográfica keyed em u
+  (no referencial de direção da ave, nunca dentro da montanha), sombra que segue a ave. 60 fps (web e lite). `?u=`, `?ui=0`,
+  Espaço = auto-play, C = câmera livre, H = esconde a UI. QA: `__op.setU(u)`.
+
 ### Performance — o que medimos (Intel UHD 620 / i5-10210U, 1080p; vale para as novas feras)
 - **Resultado:** o hero com a fênix foi de **19,5 → 38,8 fps** (A/B intercalado, vsync ligado) com visual equivalente
   (diff de pixels: corpo PSNR 61–71 dB; chamas estatisticamente iguais), e o governador leva a ~55–60 fps nos tiers altos.
