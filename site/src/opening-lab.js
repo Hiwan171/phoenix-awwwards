@@ -13,6 +13,7 @@ import { createPath, createTimeline } from './beasts/flight-path.js';
 import { applyEyes, blinkAt } from './beasts/fenix-eyes.js';
 import { applyFenixLook } from './beasts/fenix-look.js';
 import { createEmbers } from './beasts/fenix-embers.js';
+import { createFootGrip } from './beasts/fenix-grip.js';
 import { createHeroPost, LAYER_SILHOUETTE, LAYER_OCCLUDER } from './hero-post.js';
 
 const Q = new URLSearchParams(location.search);
@@ -192,7 +193,8 @@ function windDrift(material, { box, centre, follow }) {
 // ───────────── the flight: path + scroll timeline (all pure functions of the progress u) ─────────────
 const Hp = PEAK.top, L = LEDGE.top;
 const PATH = [
-  [0, Hp + 0.5, 0],            // 0 perched (the bird's centre is ~0.5 above its feet)
+  [0, Hp + 0.5, 0.3],          // 0 perched (the bird's centre is ~0.5 above its feet; 0.3 back from the apex puts her FEET on the summit, not on its
+                               //   steep front slope where one foot hung 12-28 cm above the rock)
   [0, Hp + 0.3, -2.6],         // 1 the leap: OUT and a little down (big birds drop off a perch to gain speed; climbing at once pitched
                                //   her nose-up and swung the rear through the summit)
   [1.6, Hp + 2.7, -7],         // 2 climbing
@@ -374,6 +376,77 @@ function solveTailLift() {
     return mx.map((_, i) => { let s = 0, w = 0; for (let k = -2; k <= 2; k++) { const ww = 3 - Math.abs(k); s += ww * mx[Math.min(n - 1, Math.max(0, i + k))]; w += ww; } return Math.max(r[i], s / w); }); };
   tailLiftTable = smooth(raw); bodyLiftTable = smooth(rawY);
 }
+// ───────────── FOOT PLACEMENT: each foot on its own ground ─────────────
+// The summit is not flat: with two legs of the same length one foot stood on the rock and the other hung 11-28 cm above it (it
+// looked like she was floating). Each leg is solved on its own: hip, knee and ankle rotate (the foot joint gives the sum back, so
+// the foot keeps its orientation) to bring that foot's SOLE down to the rock, the toes joint follows the slope (heel and claw tips
+// both touch), and the toes do not slide fore/aft. Like the tail, solved ONCE at load per u on the ground and read as a curve.
+const LEG_FOOT = [['Bone_004', 'Bone_003', 'Bone_002'], ['Bone_011', 'Bone_010', 'Bone_009']], LEG_ANKLE = ['Bone_003', 'Bone_010'], LEG_TOES = ['Bone_002', 'Bone_009'];
+const legSkins = LEG_FOOT.map((nmz) => {
+  const g = skinned.geometry, si = g.attributes.skinIndex, sw = g.attributes.skinWeight, names = skinned.skeleton.bones.map((b) => b.name);
+  const set = new Set(nmz.map((n) => names.indexOf(n))), out = [];
+  for (let i = 0; i < si.count; i++) { let b = 0, w = -1; for (let k = 0; k < 4; k++) { const ww = sw.getComponent(i, k); if (ww > w) { w = ww; b = si.getComponent(i, k); } } if (set.has(b)) out.push(i); }
+  return skinSet(out.filter((_, i) => i % 2 === 0));
+});
+const V2 = new THREE.Vector3(), FWD = new THREE.Vector3();
+/** sole of leg li: lowest clearance near the heel (< 40 % of the foot's reach from the foot joint) and near the claw tips (> 60 %),
+ *  and where the toes are along her heading */
+function soleOf(li) {
+  bird.updateMatrixWorld(true);
+  const a = flight.bones[flight.byName.get(LEG_ANKLE[li])].getWorldPosition(V2), ax = a.x, az = a.z, pts = [];
+  let dMax = 1e-6;
+  legSkins[li]((x, y, z) => { const d = Math.hypot(x - ax, z - az); pts.push(d, y - surfaceAt(x, z)); if (d > dMax) dMax = d; });
+  let heel = 9, tip = 9;
+  for (let i = 0; i < pts.length; i += 2) { const f = pts[i] / dMax, c = pts[i + 1]; if (f < 0.4 && c < heel) heel = c; if (f > 0.6 && c < tip) tip = c; }
+  FWD.set(0, 0, -1).applyQuaternion(bird.quaternion); FWD.y = 0; FWD.normalize();
+  const t = flight.bones[flight.byName.get(LEG_TOES[li])].getWorldPosition(V2);
+  return { heel, tip, fwd: (t.x - bird.position.x) * FWD.x + (t.z - bird.position.z) * FWD.z };
+}
+const LEG_DU = 0.01, SOLE_MARGIN = 0.006, LEG_ITERS = +(Q.get('legit') ?? 4), LEG_LIM = +(Q.get('leglim') ?? 0.9);
+let legAdjTable = null, legSolve = null;
+const legAdjOut = new Float64Array(10);
+function legAdjAt(u) {
+  if (legSolve !== null) return legSolve;
+  if (!legAdjTable) return null;
+  const x = Math.min(1, Math.max(0, u)) / LEG_DU, i = Math.min(legAdjTable.length - 2, Math.floor(x)), f = x - i;
+  for (let k = 0; k < 10; k++) legAdjOut[k] = legAdjTable[i][k] * (1 - f) + legAdjTable[i + 1][k] * f;
+  return legAdjOut;
+}
+// the free parameters of a leg: (hip +d, foot -d), (knee +d, foot -d), (ankle +d, foot -d), (toes +d)
+const LEG_BASIS = [[1, 0, 0, -1, 0], [0, 1, 0, -1, 0], [0, 0, 1, -1, 0], [0, 0, 0, 0, 1]];
+function solveLegsAt(u) {
+  const adj = new Float64Array(10); legSolve = adj;
+  place(u, true, true);
+  const fwd0 = [soleOf(0).fwd, soleOf(1).fwd];
+  const resid = (li) => { place(u, true, true); const s0 = soleOf(li); return [s0.heel - SOLE_MARGIN, s0.tip - SOLE_MARGIN, (s0.fwd - fwd0[li]) * 2]; };
+  for (let it = 0; it < LEG_ITERS; it++) {
+    for (let li = 0; li < 2; li++) {
+      const r0 = resid(li);
+      if (Math.abs(r0[0]) < 0.002 && Math.abs(r0[1]) < 0.002) continue;
+      // Jacobian by finite differences over the 4 parameters, damped least squares  (J^T J + l I) dp = -J^T r
+      const J = LEG_BASIS.map((bv) => { const d = 0.04; for (let j = 0; j < 5; j++) adj[li * 5 + j] += bv[j] * d; const r1 = resid(li); for (let j = 0; j < 5; j++) adj[li * 5 + j] -= bv[j] * d; return r1.map((x, k) => (x - r0[k]) / d); });
+      const n = 4, A = Array.from({ length: n }, (_, a) => Array.from({ length: n }, (_, b) => J[a].reduce((sum, x, k) => sum + x * J[b][k], 0) + (a === b ? 0.02 : 0)));
+      const g = J.map((col) => -col.reduce((sum, x, k) => sum + x * r0[k], 0));
+      // solve A x = g (Gauss)
+      for (let c = 0; c < n; c++) { let pv = c; for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[pv][c])) pv = r; [A[c], A[pv]] = [A[pv], A[c]]; [g[c], g[pv]] = [g[pv], g[c]];
+        for (let r = c + 1; r < n; r++) { const m = A[r][c] / A[c][c]; for (let k = c; k < n; k++) A[r][k] -= m * A[c][k]; g[r] -= m * g[c]; } }
+      const x = new Array(n).fill(0); for (let c = n - 1; c >= 0; c--) { let v = g[c]; for (let k = c + 1; k < n; k++) v -= A[c][k] * x[k]; x[c] = v / A[c][c]; }
+      const big = Math.max(...x.map(Math.abs)), sc = big > 0.35 ? 0.35 / big : 1;
+      x.forEach((dp, k) => { for (let j = 0; j < 5; j++) adj[li * 5 + j] += LEG_BASIS[k][j] * dp * sc; });
+      for (let j = 0; j < 5; j++) adj[li * 5 + j] = Math.max(-LEG_LIM, Math.min(LEG_LIM, adj[li * 5 + j]));   // a leg, not a contortionist
+    }
+  }
+  legSolve = null;
+  return Array.from(adj);
+}
+function solveLegs() {
+  const n = Math.round(1 / LEG_DU) + 1, keepT = lifeT; lifeT = 10;
+  const tab = Array.from({ length: n }, () => new Array(10).fill(0)), gnd = [];
+  for (let i = 0; i < n; i++) { const u = i * LEG_DU, g = timeline.at(u).ground; gnd.push(g); if (g > 0.999) tab[i] = solveLegsAt(u); }
+  // partly on the ground (taking off / touching down): the nearest standing solution, faded by the ground weight
+  for (let i = 0; i < n; i++) if (gnd[i] <= 0.999 && gnd[i] > 0.001) { let j = i, best = -1; for (let k = 1; k < n && best < 0; k++) { if (i - k >= 0 && gnd[i - k] > 0.999) best = i - k; else if (i + k < n && gnd[i + k] > 0.999) best = i + k; } if (best >= 0) tab[i] = tab[best].map((v) => v * gnd[i]); }
+  legAdjTable = tab; lifeT = keepT;
+}
 /** the lowest point of the feet above the terrain (world units) */
 const footSkin = skinSet(contactVerts);
 function footClearance() {
@@ -409,7 +482,7 @@ function place(u, usePlants = true, noWind = false) {
   const lf = LIFE.at(u);
   life = lf;
   const P = {
-    ground: k.ground, sleep: lf.sleep, crouch: lf.sleep, shake: lf.shake, tailLift: tailLiftAt(u), shakePh: u * 300, wind: noWind ? 0 : lf.wind * WIND_GAIN, hug: lf.hug, windX: windM.x, windY: windM.y, windZ: windM.z,
+    ground: k.ground, legAdj: legAdjAt(u), sleep: lf.sleep, crouch: lf.sleep, shake: lf.shake, tailLift: tailLiftAt(u), shakePh: u * 300, wind: noWind ? 0 : lf.wind * WIND_GAIN, hug: lf.hug, windX: windM.x, windY: windM.y, windZ: windM.z,
     t: lifeT, phase: k.beats, flap: k.flap, open: k.open, sweep: k.sweep, legs: k.legs, tail: k.tail, fly: k.fly, stretch: k.stretch, alert: k.alert,
     bank: b.bank * (1 - k.ground), pitch: b.pitch * (1 - k.ground) + k.pitchBias, pitchRate: b.pitchRate * 0.08 * (1 - k.ground), yawRate: b.yawRate * 0.08 * (1 - k.ground),
     lookYaw: Math.max(-0.5, Math.min(0.5, b.yawRate * 0.04)) * (1 - k.ground), lookPitch: 0, load: Math.max(-1, Math.min(1, b.pitchRate * 0.1)) * (1 - k.ground),
@@ -437,6 +510,7 @@ function place(u, usePlants = true, noWind = false) {
     }
   }
   bird.position.y += bodyLiftAt(u);                                 // the leap clears the peak (solved with the tail lift)
+  if (usePlants && !noWind) { bird.updateMatrixWorld(true); grip?.update(k.ground); }
   return { k, b, P };
 }
 
@@ -531,11 +605,16 @@ function frame(now) {
   draw(now / 1000);
   requestAnimationFrame(frame);
 }
+const solveT0 = performance.now();
+solveLegs();                                               // once: each foot on its own ground (before the tail: it moves the body)
+// the claws close on the rock where it falls away under them (after skinning, see fenix-grip.js); ?grip=0 off
+const grip = Q.get('grip') === '0' ? null : createFootGrip({ mesh: skinned, feet: LEG_FOOT, joints: LEG_ANKLE, surfaceAt });
 solveTailLift();                                           // once, now that the scene and the feet are known
+const solveMs = performance.now() - solveT0;                // (to bake into data for the site: they depend on u only)
 requestAnimationFrame(frame);
 
 // QA hooks
 window.__op = { THREE, scene, camera, bird, flight, path, timeline, heightAt, surfaceAt, PATH, skinned,
   setU(uu, time = performance.now() / 1000) { hold = true; u = uu; lifeT = time; const r = place(uu); placeCamera(uu, r.b); shadowFollow(); draw(time); return r; },
   render: (time = performance.now() / 1000) => draw(time), renderer, get post() { return post; }, get look() { return look; }, get embers() { return embers; },
-  get tier() { return tier; }, tailClearance, footClearance, setLiftSolve(v) { liftSolve = v; }, place, ready: true };
+  get tier() { return tier; }, solveMs, tailClearance, footClearance, soleOf, get legAdjTable() { return legAdjTable; }, setLiftSolve(v) { liftSolve = v; }, place, ready: true };

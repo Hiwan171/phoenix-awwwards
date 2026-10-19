@@ -21,6 +21,8 @@
 //   P.shake     0..1  feathers ruffled and shaken out (waking up): a quick shiver of the body and the plumage; P.shakePh its phase
 //               in cycles (from the timeline, like the wing beat: it plays as the scroll passes and holds when it stops)
 //   P.hug       0..1  folded wings drawn in against the body (seen from the front the plain fold holds them out like arms)
+//   P.legAdj    null | 10 numbers: per-leg extra rotation (rad, like CROUCH) of hip, knee, ankle, foot, toes, leg A then leg B: the
+//               scene's foot placement (each foot reaches its own ground, the toes follow its slope)
 //   P.ground    0..1  standing on something: the legs and the pelvis (which carries them) hold STILL, no sway; the life is above them
 //   P.tailLift  rad   the tail raised (spread over its root chains): the scene uses it to keep the plumes off the ground
 //   P.crouch    0..1  standing crouch: the legs flex with the feet kept flat where they stand, the body comes down (roosting)
@@ -37,7 +39,7 @@ const TAU = Math.PI * 2;
 
 export const FLIGHT_DEFAULTS = {
   t: 0, phase: 0, flap: 1, open: 1, sweep: 0, legs: 0, tail: 0.5, bank: 0, pitch: 0, pitchRate: 0, yawRate: 0, lookYaw: 0, lookPitch: 0,
-  fly: 0, stretch: 0.5, alert: 1, rate: 0, load: 0, sleep: 0, wind: 0, windX: 0, windY: 0, windZ: 1, shake: 0, shakePh: 0, hug: 0, crouch: 0, tailLift: 0, ground: 0,
+  fly: 0, stretch: 0.5, alert: 1, rate: 0, load: 0, sleep: 0, wind: 0, windX: 0, windY: 0, windZ: 1, shake: 0, shakePh: 0, hug: 0, crouch: 0, tailLift: 0, ground: 0, legAdj: null,
 };
 
 // Poses of a fully folded wing (cl = 1). Angles are added on top of the open pose; they are what the lab's "fold" sliders edit.
@@ -391,7 +393,7 @@ export function createFenixFlight(model, opts = {}) {
         const calm = (1 - Math.abs(L) * 0.5) * (1 - P.ground);          // planted: firm, no sway
         const wv = (0.10 + 0.05 * j) * Math.sin(TAU * (P.phase - 0.13 * (j + 1) - (r.li ? 0.08 : 0))) * P.flap * (0.4 + 0.6 * f);
         const sway = (0.07 * Math.sin(TAU * (0.4 * t - 0.15 * j + (r.li ? 0.1 : 0))) + 0.04 * Math.sin(TAU * (0.9 * t - 0.2 * j))) * calm - 0.18 * P.pitchRate * (j + 1) / 5;
-        rz(A, a + sway + wv * (1 - P.ground) + clampT(P.load * 0.25, 0.2) / 5 + P.crouch * CROUCH[j]);
+        rz(A, a + sway + wv * (1 - P.ground) + clampT(P.load * 0.25, 0.2) / 5 + P.crouch * CROUCH[j] + (P.legAdj ? P.legAdj[r.li * 5 + j] : 0));
         ry(B, (0.05 + 0.03 * j) * Math.sin(TAU * (0.55 * t - 0.17 * j + (r.li ? 0.3 : 0))) * calm + (r.side) * (0.05 + 0.04 * j) * f * L - P.yawRate * 0.10 * (j + 1) / 5 * (r.side));
         rx(C, (r.side) * (0.02 + 0.015 * j) * Math.sin(TAU * (0.7 * t - 0.2 * j)) * (1 - P.ground));
         qmul(D, A, B); qmul(E, D, C); return qmul(out, base, E);

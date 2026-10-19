@@ -182,7 +182,16 @@ sozinho.** Estado: **dragão e fênix prontos**; tigre e tartaruga aguardam. Tud
   - **Patas firmes no chão** (`P.ground`): pousada, as pernas não balançam (o balanço é das pernas penduradas em voo) e a BACIA
     (Spine_00, que carrega as pernas) não respira nem balança com o vento; a vida fica do peito para cima. Antes os pés derivavam
     até 7 cm em 8 s parados; agora 0,0 mm. Câmera de abertura mais aberta: 4,5 à frente, 0,5 abaixo, o pico inteiro, e um
-    avanço até perto dela quando acorda. Câmera de frente, centralizada, levemente de cima
+    avanço até perto dela quando acorda.
+  - **Cada pé no seu chão + garras agarrando (pedido: "a pata e as unhas se curvarem se houver desnível").** Medido antes: no topo
+    uma pata tocava e a outra ficava 11-28 cm no ar (ela pousava na ENCOSTA frontal do pico; `PATH[0]` recuado 0,3 põe os pés no
+    cume). (1) IK por perna (`P.legAdj`, resolvido no load por u: quadril/joelho/tornozelo giram e o pé devolve a soma, os dedos
+    seguem a inclinação; mínimos quadrados amortecidos por diferenças finitas; alvo: calcanhar e pontas da sola a 6 mm, dedos sem
+    deslizar). (2) `beasts/fenix-grip.js`: o Meshy tem UM osso para os dedos, então as garras se curvam por vértice: colunas de 1 cm
+    da sola, cada vértice desce o vão da sua coluna EM ARCO em torno da articulação do pé (não estica), mais na ponta; offsets numa
+    textura 64x64 lida no vertex shader após o skinning, reenviada só quando os pés mexem. `?grip=0` desliga.
+  - Custo: `place()` no chão 2,1 ms; os solvers (pernas + cauda) levam ~2,6 s no load do laboratório: no site, gravar as tabelas
+    como dados (dependem só de u). Câmera de frente, centralizada, levemente de cima
     (o vale escuro atrás dá contraste ao brilho), com push-in lento; ela acorda (olhos → cabeça → de pé → sacode → olha) e a
     câmera gira para o lado no agachamento.
   - **O relógio da VIDA (respiração, vento, olhar, piscar, tremulação) agora é o relógio real** (`lifeT`): na abertura ninguém
