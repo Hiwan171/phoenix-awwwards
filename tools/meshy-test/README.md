@@ -258,3 +258,12 @@ froze the wing. Always render the result at the user's camera distance before de
 - "Ombro largo / borrado": the soft seam still stretched the shoulder skin (smear seen at the beat bottom from behind). SEAM_MAX
   0.6 -> 0.3 (compared 0.6 / 0.3 / 0 side by side at the user's distance: 0.3 visibly less smeared; 0 crispest but opens the armpit).
   It is one number: rig-spine.mjs SEAM_MAX.
+
+### "Asa partida": the lower half dead, fixed to the body (19/10/2026, user's screenshot with an arrow at the break)
+The wing's lower/inner layer is the COVERT feathers that Meshy put on Bone_043..048 (F_back chains): they lie over the wing roots and the
+back. To fix the tail root (16/10) `rig-spine.mjs` had skinned ALL of them to the spine (BACK_TO_SPINE), so the half lying on the wing
+stopped beating: upper wing beating, lower wing dead and stuck to the body. Now each covert vertex is split by its distance to the spine
+centre line: over the back (< BACK_W0 = 0.14) it follows the spine, on the wing (> BACK_W1 = 0.30) it takes the weights of the nearest
+wing vertex, smoothstep in between. Covert distances: p10 0.11, p50 0.27, p90 0.43 (most of them lie on the wing).
+Result: armpit (wing x body contact pairs near the shoulders) median 17-18 -> 8-10 cm in flight; wing x wing gaps <= 6.5 cm; stretched
+edges 0.21-0.24 % -> 0.14-0.16 %. Price: tail root x body median 1 -> 4 cm (max 9).

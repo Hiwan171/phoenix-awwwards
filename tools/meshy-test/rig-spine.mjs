@@ -98,6 +98,18 @@ for (let it = 0; it < 3; it++) { const c2 = centres.map((c) => c.slice()); for (
   for (let v = 0; v < nV; v++) { let m = 0; for (let k = 0; k < 4; k++) if (wingJoint[J[v*4+k]]) m += Wt[v*4+k]; if (m < 0.5) continue; const d = distLine(pos[v*3], pos[v*3+1], pos[v*3+2]); const t = Math.min(1, Math.max(0, (d - WING_D0) / (WING_D1 - WING_D0))); const a = WING_MAX * (1 - t * t * (3 - 2 * t)) * m; if (a > 0.001) { alphaWing[v] = a; n++; } }
   console.log(`wing root vertices sharing the spine: ${n} (d ${WING_D0}..${WING_D1}, max ${WING_MAX})`);
 }
+// ── the COVERT feathers (Meshy's Bone_043..048 / F_back): they lie over the wing roots and the back. Over the back they must follow the
+// spine (else the tail root comes off the body); out on the wing they must follow the WING (else the lower half of the wing is dead and
+// separated from the beating upper half: the user's "asa partida"). Share to the wing = smoothstep of the distance to the centre line.
+const BACK_W0 = +(process.env.BACK_W0 ?? 0.14), BACK_W1 = +(process.env.BACK_W1 ?? 0.30);
+const backSet = new Set(BACK_JOINTS);
+const alphaBack = new Float32Array(nV), backWing = new Float32Array(nV);
+{ const distLine = (x, y, z) => { let best = Infinity; for (let i = 0; i < K - 1; i++) { const a = centres[i], b = centres[i+1], dx = b[0]-a[0], dy = b[1]-a[1], dz = b[2]-a[2], l2 = dx*dx+dy*dy+dz*dz || 1e-9; const t = Math.max(0, Math.min(1, ((x-a[0])*dx + (y-a[1])*dy + (z-a[2])*dz) / l2)); best = Math.min(best, Math.hypot(x-a[0]-dx*t, y-a[1]-dy*t, z-a[2]-dz*t)); } return best; };
+  const ds = [];
+  for (let v = 0; v < nV; v++) { let m = 0; for (let k = 0; k < 4; k++) if (backSet.has(J[v*4+k])) m += Wt[v*4+k]; if (m <= 1e-4) continue; alphaBack[v] = m; const d = distLine(pos[v*3], pos[v*3+1], pos[v*3+2]); ds.push(d); const t = Math.min(1, Math.max(0, (d - BACK_W0) / (BACK_W1 - BACK_W0))); backWing[v] = t * t * (3 - 2 * t); }
+  ds.sort((a, b) => a - b); const q = (p) => ds[Math.floor(ds.length * p)]?.toFixed(3);
+  console.log(`covert vertices ${ds.length}: distance to the spine line p10 ${q(0.1)} p50 ${q(0.5)} p90 ${q(0.9)}; to the wing beyond ${BACK_W0}..${BACK_W1}`);
+}
 console.log('spine joints:'); centres.forEach((c, i) => console.log('  Spine_' + String(i).padStart(2, '0'), c.map((x) => x.toFixed(2)).join(', ')));
 if (process.env.DRY) process.exit(0);
 
@@ -128,16 +140,26 @@ const bs = (u) => {                                                             
   for (let k = 0; k < 4; k++) { const j = Math.min(K - 1, Math.max(0, i0 - 1 + k)); o.set(j, (o.get(j) ?? 0) + b[k]); }   // clamped ends
   return o;
 };
+// nearest vertex that belongs to the WING (wing bones / wing feather chains >= 0.8 of its weight), by a spatial grid
+const wingDom = new Uint8Array(nV);
+for (let v = 0; v < nV; v++) { let m = 0; for (let k = 0; k < 4; k++) if (wingJoint[J[v*4+k]]) m += Wt[v*4+k]; if (m >= 0.8) wingDom[v] = 1; }
+const WCELL = 0.05, wgrid = new Map(), wkey = (x, y, z) => `${x},${y},${z}`;
+for (let v = 0; v < nV; v++) if (wingDom[v]) { const k = wkey(Math.floor(pos[v*3]/WCELL), Math.floor(pos[v*3+1]/WCELL), Math.floor(pos[v*3+2]/WCELL)); (wgrid.get(k) ?? wgrid.set(k, []).get(k)).push(v); }
+function nearestWing(v) { const cx = Math.floor(pos[v*3]/WCELL), cy = Math.floor(pos[v*3+1]/WCELL), cz = Math.floor(pos[v*3+2]/WCELL); let best = -1, bd = Infinity;
+  for (let r = 1; r <= 4 && best < 0; r++) for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) for (let dz = -r; dz <= r; dz++) { const l = wgrid.get(wkey(cx+dx, cy+dy, cz+dz)); if (!l) continue; for (const q of l) { const d = (pos[q*3]-pos[v*3])**2 + (pos[q*3+1]-pos[v*3+1])**2 + (pos[q*3+2]-pos[v*3+2])**2; if (d < bd) { bd = d; best = q; } } }
+  return best; }
 const nOld = joints.length, buffer = root.listBuffers()[0];
 const nJ = new Uint16Array(nV * 4), nW = new Float32Array(nV * 4);
 let changed = 0;
 for (let v = 0; v < nV; v++) {
-  if (alpha[v] <= 1e-4 && alphaTail[v] <= 1e-4 && alphaWing[v] <= 1e-4) { for (let k = 0; k < 4; k++) { nJ[v*4+k] = J[v*4+k]; nW[v*4+k] = Wt[v*4+k]; } continue; }
+  if (alpha[v] <= 1e-4 && alphaTail[v] <= 1e-4 && alphaWing[v] <= 1e-4 && alphaBack[v] <= 1e-4) { for (let k = 0; k < 4; k++) { nJ[v*4+k] = J[v*4+k]; nW[v*4+k] = Wt[v*4+k]; } continue; }
   const entries = new Map();
   const extra = Math.min(1, alphaTail[v] + alphaWing[v]), keep = 1 - extra;
   for (let k = 0; k < 4; k++) if (!oldSet.has(J[v*4+k]) && Wt[v*4+k] > 0) entries.set(J[v*4+k], (entries.get(J[v*4+k]) ?? 0) + Wt[v*4+k] * keep);
   const u = project(pos[v*3], pos[v*3+1], pos[v*3+2]) * (K - 1);
-  for (const [j, b] of bs(Math.min(K - 1.0001, u))) entries.set(nOld + j, (entries.get(nOld + j) ?? 0) + (alpha[v] * keep + extra) * b);
+  const toWing = alphaBack[v] * backWing[v] * keep;                  // covert weight that goes to the wing instead of the spine
+  for (const [j, b] of bs(Math.min(K - 1.0001, u))) entries.set(nOld + j, (entries.get(nOld + j) ?? 0) + ((alpha[v] * keep - toWing) + extra) * b);
+  if (toWing > 1e-4) { const q = nearestWing(v); if (q >= 0) for (let k = 0; k < 4; k++) { const w = Wt[q*4+k]; if (w > 0) entries.set(J[q*4+k], (entries.get(J[q*4+k]) ?? 0) + toWing * w); } }
   const top = [...entries.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4), sum = top.reduce((s, e) => s + e[1], 0);
   for (let k = 0; k < 4; k++) { nJ[v*4+k] = top[k]?.[0] ?? 0; nW[v*4+k] = top[k] ? top[k][1] / sum : 0; }
   changed++;
