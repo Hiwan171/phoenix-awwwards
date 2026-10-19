@@ -230,8 +230,8 @@ const WIND_GAIN = +(Q.get('wind') ?? 1);                 // ?wind=0 no wind on t
 const SECONDS = 40;                                        // the clock of the small life-motions over the whole scroll
 // camera, in the bird's heading frame (f forward, r right, up), keyed on u; tf/tu = where it looks (ahead of / above the bird)
 const CAM = createTimeline([
-  { u: 0.00, cf: 2.4, cr: 0.0,  cu: 0.28, tf: 0.0, tu: -0.06, fov: 30 },    // FRONT, centred, a little from above: she sleeps on the peak (a slow push-in)
-  { u: 0.05, cf: 2.05, cr: 0.0, cu: 0.24, tf: 0.0, tu: -0.04, fov: 30 },
+  { u: 0.00, cf: 2.4, cr: 0.0,  cu: -0.12, tf: 0.0, tu: 0.10, fov: 30 },    // FRONT, centred, at chest height looking almost level: she sleeps on the peak against the sky (a slow push-in)
+  { u: 0.05, cf: 2.05, cr: 0.0, cu: -0.12, tf: 0.0, tu: 0.10, fov: 30 },
   { u: 0.085, cf: 2.6, cr: 0.35, cu: -0.20, tf: 0.0, tu: 0.14, fov: 31 },   // she wakes (still almost frontal)
   { u: 0.11, cf: 2.1, cr: 1.8,  cu: -0.32, tf: 0.0, tu: 0.20, fov: 34 },    // the camera starts round to her side
   { u: 0.13, cf: 0.6, cr: 3.0,  cu: -0.10, tf: 0.6, tu: 0.20, fov: 36 },    // side, as she crouches
