@@ -14,7 +14,7 @@ import { applyEyes, blinkAt } from './beasts/fenix-eyes.js';
 import { applyFenixLook } from './beasts/fenix-look.js';
 import { createEmbers } from './beasts/fenix-embers.js';
 import { createFootGrip } from './beasts/fenix-grip.js';
-import { createCloudSea, heightAt, surfaceAt, PEAK, LEDGE, SUN_DIR, CLOUD_Y } from './worlds/cloud-sea.js';
+import { createMountainWorld, heightAt, surfaceAt, PEAK, LEDGE, SUN_DIR, CLOUD_Y } from './worlds/mountain-world.js';
 import { createHeroPost, LAYER_SILHOUETTE, LAYER_OCCLUDER } from './hero-post.js';
 
 const Q = new URLSearchParams(location.search);
@@ -42,8 +42,8 @@ addEventListener('resize', resize); resize();
 if (LOOK) post = createHeroPost({ renderer, scene, camera, aura: Q.get('aura') !== '0', bloom: Q.get('bloom') !== '0', params: {
   samples: +(Q.get('msaa') ?? 4), scale: +(Q.get('scale') ?? 1), intensity: 0.8, height: 0.2, rim: 0, opaque: 0.4, steps: +(Q.get('steps') ?? 12), occluders: true, bloomStrength: +(Q.get('bs') ?? 0.5), bloomRadius: 0.55, bloomThreshold: +(Q.get('bt') ?? 1.8) } });
 
-// ───────────── the world: worlds/cloud-sea.js (sky, pillars, the sea of clouds) ─────────────
-// heightAt / surfaceAt / PEAK / LEDGE come from there: the two perch pillars are a heightfield her feet and tail touch exactly.
+// ───────────── the world: worlds/mountain-world.js (mountain1's peaks and cloud sea; she perches on its highest peak) ─────────────
+// heightAt / surfaceAt / PEAK / LEDGE come from there: the field of the shader, ported to JS, so her feet and tail touch it exactly.
 const sceneryDrifts = [];
 const hash = (x, y) => { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); };
 // drifting embers in the air (cheap points), for scale and depth
@@ -102,21 +102,21 @@ function windDrift(material, { box, centre, follow }) {
 // ───────────── the flight: path + scroll timeline (all pure functions of the progress u) ─────────────
 const Hp = PEAK.top, L = LEDGE.top;
 const PATH = [
-  [0, Hp + 0.5, 0.3],          // 0 perched (the bird's centre is ~0.5 above its feet; 0.3 back from the apex puts her FEET on the summit, not on its
+  [0, Hp + 0.5, 0.45],         // 0 perched (the bird's centre is ~0.5 above its feet; 0.3 back from the apex puts her FEET on the summit, not on its
                                //   steep front slope where one foot hung 12-28 cm above the rock)
   [0, Hp + 0.3, -2.6],         // 1 the leap: OUT and a little down (big birds drop off a perch to gain speed; climbing at once pitched
                                //   her nose-up and swung the rear through the summit)
   [1.6, Hp + 2.7, -7],         // 2 climbing
   [5, Hp + 3.3, -14],          // 3 over the valley
   [6.2, Hp + 2.6, -22],        // 4 soaring, turning left
-  [2.5, CLOUD_Y + 4.0, -29],   // 5 gliding down to the cloud sea
-  [-5, CLOUD_Y + 3.3, -34],    // 6 skimming the cloud tops (her fire lights them under her; the crests reach ~+2.5)
-  [-10.5, L + 2.2, -37],       // 7 approach
-  [-11.8, L + 0.95, -39.1],    // 8 flare
-  [-12, L + 0.5, -40],         // 9 touchdown
+  [2.5, CLOUD_Y + 9.0, -29],   // 5 gliding down toward the mist
+  [-7, CLOUD_Y + 7.5, -36],    // 6 low over the mist between the peaks
+  [LEDGE.x + 1.5, L + 2.2, LEDGE.z + 3.0],    // 7 approach
+  [LEDGE.x + 0.2, L + 0.95, LEDGE.z + 0.9],   // 8 flare
+  [LEDGE.x, L + 0.5, LEDGE.z],                // 9 touchdown
 ];
 const path = createPath(PATH);
-const world = createCloudSea({ scene, avoid: PATH, quality: Q.get('lite') === '1' ? 0.5 : 1 });
+const world = createMountainWorld({ scene });
 for (const o of world.occluders) o.layers.enable(LAYER_OCCLUDER);
 sun.color.copy(world.sunColor); sun.intensity = 3.4;
 hemi.color.copy(world.skyLight); hemi.groundColor.copy(world.groundLight); hemi.intensity = 1.1;   // ground = the sunset bounce off the cloud sea
@@ -160,8 +160,8 @@ const WIND_GAIN = +(Q.get('wind') ?? 1);                 // ?wind=0 no wind on t
 const SECONDS = 40;                                        // the clock of the small life-motions over the whole scroll
 // camera, in the bird's heading frame (f forward, r right, up), keyed on u; tf/tu = where it looks (ahead of / above the bird)
 const CAM = createTimeline([
-  { u: 0.00, cf: +(Q.get('cf') ?? 9.0), cr: +(Q.get('cr') ?? 3.5), cu: +(Q.get('cu') ?? -2.2), tf: 0.0, tu: +(Q.get('tu') ?? -0.6), fov: 30 },    // FRONT, centred, from a little below and further out: the whole peak, she sleeps on it against the sky (a slow push-in)
-  { u: 0.05, cf: +(Q.get('cf') ?? 9.0) * 0.8, cr: +(Q.get('cr') ?? 3.5) * 0.8, cu: +(Q.get('cu') ?? -2.2) * 0.8, tf: 0.0, tu: +(Q.get('tu') ?? -0.6) * 0.7, fov: 30 },
+  { u: 0.00, cf: 8.0, cr: 0.0, cu: 0.2, tf: 0.0, tu: -0.5, fov: 30 },    // FRONT, centred, from a little below and further out: the whole peak, she sleeps on it against the sky (a slow push-in)
+  { u: 0.05, cf: 6.6, cr: 0.0, cu: 0.1, tf: 0.0, tu: -0.35, fov: 30 },
   { u: 0.085, cf: 2.6, cr: 0.35, cu: -0.20, tf: 0.0, tu: 0.14, fov: 31 },   // she wakes (still almost frontal)
   { u: 0.11, cf: 2.1, cr: 1.8,  cu: -0.32, tf: 0.0, tu: 0.20, fov: 34 },    // the camera starts round to her side
   { u: 0.13, cf: 0.6, cr: 3.0,  cu: -0.10, tf: 0.6, tu: 0.20, fov: 36 },    // side, as she crouches
