@@ -14,6 +14,7 @@ import { applyEyes, blinkAt } from './beasts/fenix-eyes.js';
 import { applyFenixLook } from './beasts/fenix-look.js';
 import { createEmbers } from './beasts/fenix-embers.js';
 import { createFootGrip } from './beasts/fenix-grip.js';
+import { createCloudSea, heightAt, surfaceAt, PEAK, LEDGE, SUN_DIR, CLOUD_Y } from './worlds/cloud-sea.js';
 import { createHeroPost, LAYER_SILHOUETTE, LAYER_OCCLUDER } from './hero-post.js';
 
 const Q = new URLSearchParams(location.search);
@@ -28,15 +29,12 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
-const HORIZON = new THREE.Color('#d9774a'), ZENITH = new THREE.Color('#1d1a33'), FOG = new THREE.Color('#6e3b40');
-scene.fog = new THREE.FogExp2(FOG, 0.0075);
 scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture; scene.environmentIntensity = 0.35;
-const SUN_DIR = new THREE.Vector3(-0.55, 0.22, -0.8).normalize();
 const sun = new THREE.DirectionalLight(0xffc48a, 3.2); sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024); sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 40; sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.02;
 Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4 });
 scene.add(sun, sun.target);
-scene.add(new THREE.HemisphereLight(0xffb48a, 0x2a1820, 0.9));
+const hemi = new THREE.HemisphereLight(0xffb48a, 0x2a1820, 0.9); scene.add(hemi);
 const camera = new THREE.PerspectiveCamera(38, 1, 0.05, 600);
 let post = null, embers = null; const BUF = new THREE.Vector2(), camRight = new THREE.Vector3();
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); post?.setSize(); }
@@ -44,99 +42,10 @@ addEventListener('resize', resize); resize();
 if (LOOK) post = createHeroPost({ renderer, scene, camera, aura: Q.get('aura') !== '0', bloom: Q.get('bloom') !== '0', params: {
   samples: +(Q.get('msaa') ?? 4), scale: +(Q.get('scale') ?? 1), intensity: 0.8, height: 0.2, rim: 0, opaque: 0.4, steps: +(Q.get('steps') ?? 12), occluders: true, bloomStrength: +(Q.get('bs') ?? 0.5), bloomRadius: 0.55, bloomThreshold: +(Q.get('bt') ?? 1.8) } });
 
-// ───────────── sky: a gradient dome with the setting sun ─────────────
-{
-  const mat = new THREE.ShaderMaterial({
-    side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { uH: { value: HORIZON }, uZ: { value: ZENITH }, uSun: { value: SUN_DIR } },
-    vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-    defines: { LOOK: LOOK ? 1 : 0, SKY_GAIN: SKY_GAIN.toFixed(3) },
-    fragmentShader: `uniform vec3 uH, uZ, uSun; varying vec3 vD;
-      void main(){
-        float h = clamp(vD.y, -0.2, 1.0);
-        vec3 c = mix(uH, uZ, pow(max(h, 0.0), 0.55));
-        c = mix(c, uH * 0.55, smoothstep(0.0, -0.2, h));                 // below the horizon: the haze of the valleys
-        float s = max(dot(normalize(vD), uSun), 0.0);
-        c += vec3(1.0, 0.62, 0.32) * (pow(s, 6.0) * 0.55 + pow(s, 80.0) * 1.2);
-        float disc = smoothstep(0.9993, 0.9997, s);
-        #if LOOK
-        // with the post chain the sky is written in LINEAR light (ACES + sRGB come at the end): the gradient is decoded from the
-        // display values it was tuned in; only the sun's disc stays HDR (it feeds the bloom)
-        c = pow(min(c, vec3(1.0)), vec3(2.2)) * SKY_GAIN + vec3(1.0, 0.85, 0.6) * disc * 6.0;
-        #else
-        c += vec3(1.0, 0.9, 0.7) * disc * 3.0;
-        #endif
-        gl_FragColor = vec4(c, 1.0);
-      }`,
-  });
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 48, 24), mat); sky.renderOrder = -1; scene.add(sky);
-}
-
-// ───────────── terrain: a heightfield known in JS (the feet stand on it) ─────────────
+// ───────────── the world: worlds/cloud-sea.js (sky, pillars, the sea of clouds) ─────────────
+// heightAt / surfaceAt / PEAK / LEDGE come from there: the two perch pillars are a heightfield her feet and tail touch exactly.
 const sceneryDrifts = [];
-const PEAK = { x: 0, z: 0, top: 13.0 }, LEDGE = { x: -12, z: -40, top: 7.0 };
 const hash = (x, y) => { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); };
-const vnoise = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
-  const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1); return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v; };
-const ridged = (x, y) => { let s = 0, amp = 0.5, f = 1; for (let i = 0; i < 5; i++) { const n = 1 - Math.abs(vnoise(x * f, y * f) * 2 - 1); s += n * n * amp; amp *= 0.5; f *= 2.07; } return s; };
-function mountain(x, z, m, r, sharp) { const d = Math.hypot(x - m.x, z - m.z) / r; return Math.exp(-Math.pow(d, sharp)); }
-const smin = (a, b, k) => { const h = Math.max(0, Math.min(1, 0.5 + 0.5 * (b - a) / k)); return b + (a - b) * h - k * h * (1 - h); };   // smooth min (rounded summit)
-function spire(x, z, m, r, top, seed) {
-  const d = Math.hypot(x - m.x, z - m.z), p = Math.exp(-Math.pow(d / r, 1.05));
-  const ang = Math.atan2(z - m.z, x - m.x);
-  // flanks: ridges and gullies running down the mountain (angular noise), crags, fine rock grain; strongest mid-slope
-  const gully = ridged(Math.cos(ang) * 2.2 + seed, Math.sin(ang) * 2.2 + d * 0.35);
-  const crag = ridged(x * 0.33 + seed, z * 0.33 - seed);
-  const mid = 4 * p * (1 - p);
-  const body = top * 1.08 * p + 2.4 * mid * (gully - 0.35) + 1.4 * crag * p + 0.35 * vnoise(x * 1.7 + seed, z * 1.7) * p;
-  return smin(body, top + 0.35 * vnoise(x * 2.5 + seed, z * 2.5) + 0.2 * vnoise(x * 6, z * 6 + seed), 0.5);
-}
-function heightAt(x, z) {
-  let h = 1.6 * ridged(x * 0.035 + 3.1, z * 0.035 - 1.7) + 0.5 * vnoise(x * 0.25, z * 0.25);
-  h = Math.max(h, spire(x, z, PEAK, 4.4, PEAK.top, 7.3));      // the perch: a rocky spire with a rough, roughly flat summit
-  h = Math.max(h, spire(x, z, LEDGE, 6.0, LEDGE.top, 2.1));    // the landing crag across the valley
-  // far ranges all around, for a horizon
-  const ring = Math.hypot(x + 6, z + 20);
-  h += Math.max(0, ring - 50) * 0.16 * (0.5 + ridged(x * 0.05, z * 0.05));      // lower than the perch: from up there she looks DOWN on the world
-  return h;
-}
-// the base terrain (coarse) + two fine patches over the mountains (0.1 unit cells: no facets close to her). Inside a patch the base is
-// pushed 4 cm down so the fine surface covers it.
-const PATCHES = [{ x: PEAK.x, z: PEAK.z, size: 16, seg: 180 }, { x: LEDGE.x, z: LEDGE.z, size: 20, seg: 180 }];
-const inPatch = (x, z) => PATCHES.some((q) => Math.abs(x - q.x) < q.size / 2 - 0.2 && Math.abs(z - q.z) < q.size / 2 - 0.2);
-function terrainMesh(size, seg, cx, cz, lowerInPatches) {
-  const geo = new THREE.PlaneGeometry(size, size, seg, seg); geo.rotateX(-Math.PI / 2); geo.translate(cx, 0, cz);
-  const pos = geo.attributes.position, col = new Float32Array(pos.count * 3), c = new THREE.Color();
-  for (let i = 0; i < pos.count; i++) { const x = pos.getX(i), z = pos.getZ(i); pos.setY(i, heightAt(x, z) - (lowerInPatches && inPatch(x, z) ? 0.04 : 0)); }
-  geo.computeVertexNormals();
-  const nrm = geo.attributes.normal, low = new THREE.Color('#1c1218'), rock = new THREE.Color('#3e2420'), lit = new THREE.Color('#7a3e2c'), top = new THREE.Color('#9a6448'), dark = new THREE.Color('#24151a');
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i), z = pos.getZ(i), y = pos.getY(i), slope = 1 - nrm.getY(i);
-    c.copy(low).lerp(rock, THREE.MathUtils.smoothstep(y, 0.5, 5)).lerp(lit, THREE.MathUtils.smoothstep(y, 5, 11) * 0.7).lerp(top, THREE.MathUtils.smoothstep(y, 9, 13.5) * 0.6);
-    c.lerp(dark, THREE.MathUtils.smoothstep(slope, 0.35, 0.8) * 0.55);                                // steep rock faces darker
-    c.multiplyScalar(0.72 + 0.45 * vnoise(x * 0.6, z * 0.6) + 0.18 * (vnoise(x * 3, y * 6) - 0.5));       // grain + horizontal strata
-    col.set([c.r, c.g, c.b], i * 3);
-  }
-  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }));
-  mesh.receiveShadow = true; mesh.layers.enable(LAYER_OCCLUDER); scene.add(mesh); return mesh;
-}
-terrainMesh(180, 260, -6, -20, true);
-/** The height of the RENDERED terrain at (x, z): the triangles of the patch (or base) mesh, interpolated exactly as PlaneGeometry
- *  splits its cells; the corner heights come from heightAt once and are cached (the terrain is static). This is what contact is
- *  measured against: it is what the eye sees, and ~100x cheaper than the fractal heightAt per sample. */
-const SURF = [...PATCHES.map((q) => ({ cx: q.x, cz: q.z, size: q.size, seg: q.seg, drop: 0 })), { cx: -6, cz: -20, size: 180, seg: 260, drop: 0 }];
-const surfCache = SURF.map(() => new Map());
-function surfaceAt(x, z) {
-  let k = SURF.length - 1;
-  for (let i = 0; i < PATCHES.length; i++) { const q = SURF[i]; if (Math.abs(x - q.cx) < q.size / 2 && Math.abs(z - q.cz) < q.size / 2) { k = i; break; } }
-  const q = SURF[k], cell = q.size / q.seg, gx = (x - q.cx + q.size / 2) / cell, gz = (z - q.cz + q.size / 2) / cell;
-  const ix = Math.min(q.seg - 1, Math.max(0, Math.floor(gx))), iz = Math.min(q.seg - 1, Math.max(0, Math.floor(gz))), fx = gx - ix, fz = gz - iz;
-  const H = (a, b) => { const key = a * 4096 + b, m = surfCache[k]; let h = m.get(key); if (h === undefined) { h = heightAt(q.cx - q.size / 2 + a * cell, q.cz - q.size / 2 + b * cell); m.set(key, h); } return h; };
-  const ha = H(ix, iz), hb = H(ix, iz + 1), hc = H(ix + 1, iz + 1), hd = H(ix + 1, iz);
-  return fx + fz <= 1 ? ha + (hd - ha) * fx + (hb - ha) * fz : hc + (hb - hc) * (1 - fx) + (hd - hc) * (1 - fz);
-}
-for (const q of PATCHES) terrainMesh(q.size, q.seg, q.x, q.z, false);
 // drifting embers in the air (cheap points), for scale and depth
 {
   const N = 900, g = new THREE.BufferGeometry(), p = new Float32Array(N * 3);
@@ -200,13 +109,17 @@ const PATH = [
   [1.6, Hp + 2.7, -7],         // 2 climbing
   [5, Hp + 3.3, -14],          // 3 over the valley
   [6.2, Hp + 2.6, -22],        // 4 soaring, turning left
-  [2.5, Hp + 0.8, -29],        // 5 gliding down
-  [-5, Hp - 1.2, -34],         // 6
+  [2.5, CLOUD_Y + 4.0, -29],   // 5 gliding down to the cloud sea
+  [-5, CLOUD_Y + 3.3, -34],    // 6 skimming the cloud tops (her fire lights them under her; the crests reach ~+2.5)
   [-10.5, L + 2.2, -37],       // 7 approach
   [-11.8, L + 0.95, -39.1],    // 8 flare
   [-12, L + 0.5, -40],         // 9 touchdown
 ];
 const path = createPath(PATH);
+const world = createCloudSea({ scene, avoid: PATH, quality: Q.get('lite') === '1' ? 0.5 : 1 });
+for (const o of world.occluders) o.layers.enable(LAYER_OCCLUDER);
+sun.color.copy(world.sunColor); sun.intensity = 3.4;
+hemi.color.copy(world.skyLight); hemi.groundColor.copy(world.groundLight); hemi.intensity = 1.1;   // ground = the sunset bounce off the cloud sea
 // s = position along the path (0 perch .. 1 ledge). Flat at both ends: she stands still; PCHIP gives zero speed there, smooth in between.
 const KEYS = [
   { u: 0.00, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.00, sweep: 0.0, legs: 0.00, tail: 0.40, fly: 0.00, stretch: 0.0, alert: 0.0, ground: 1.0, pitchBias: 0.00 },   // asleep on the peak, wings folded
@@ -247,8 +160,8 @@ const WIND_GAIN = +(Q.get('wind') ?? 1);                 // ?wind=0 no wind on t
 const SECONDS = 40;                                        // the clock of the small life-motions over the whole scroll
 // camera, in the bird's heading frame (f forward, r right, up), keyed on u; tf/tu = where it looks (ahead of / above the bird)
 const CAM = createTimeline([
-  { u: 0.00, cf: 4.5, cr: 0.0,  cu: -0.50, tf: 0.0, tu: 0.12, fov: 30 },    // FRONT, centred, from a little below and further out: the whole peak, she sleeps on it against the sky (a slow push-in)
-  { u: 0.05, cf: 3.95, cr: 0.0, cu: -0.46, tf: 0.0, tu: 0.12, fov: 30 },
+  { u: 0.00, cf: +(Q.get('cf') ?? 9.0), cr: +(Q.get('cr') ?? 3.5), cu: +(Q.get('cu') ?? -2.2), tf: 0.0, tu: +(Q.get('tu') ?? -0.6), fov: 30 },    // FRONT, centred, from a little below and further out: the whole peak, she sleeps on it against the sky (a slow push-in)
+  { u: 0.05, cf: +(Q.get('cf') ?? 9.0) * 0.8, cr: +(Q.get('cr') ?? 3.5) * 0.8, cu: +(Q.get('cu') ?? -2.2) * 0.8, tf: 0.0, tu: +(Q.get('tu') ?? -0.6) * 0.7, fov: 30 },
   { u: 0.085, cf: 2.6, cr: 0.35, cu: -0.20, tf: 0.0, tu: 0.14, fov: 31 },   // she wakes (still almost frontal)
   { u: 0.11, cf: 2.1, cr: 1.8,  cu: -0.32, tf: 0.0, tu: 0.20, fov: 34 },    // the camera starts round to her side
   { u: 0.13, cf: 0.6, cr: 3.0,  cu: -0.10, tf: 0.6, tu: 0.20, fov: 36 },    // side, as she crouches
@@ -523,6 +436,7 @@ function placeCamera(u, b) {
   const c = CAM.at(u), f = heading(b); R.crossVectors(f, UP).normalize();
   camPos.copy(bird.position).addScaledVector(f, c.cf).addScaledVector(R, c.cr).addScaledVector(UP, c.cu);
   camPos.y = Math.max(camPos.y, heightAt(camPos.x, camPos.z) + 0.5);  // never inside the mountain
+  camPos.y = Math.max(camPos.y, CLOUD_Y + 4.2);                     // never inside (or under) the cloud sea
   camTgt.copy(bird.position).addScaledVector(f, c.tf).addScaledVector(UP, c.tu);
   camera.position.copy(camPos); camera.lookAt(camTgt);
   if (Math.abs(camera.fov - c.fov) > 0.01) { camera.fov = c.fov; camera.updateProjectionMatrix(); }
@@ -553,6 +467,7 @@ addEventListener('wheel', () => { if (autoplay) setPlay(false); }, { passive: tr
 if (Q.has('u')) requestAnimationFrame(() => lenis.scrollTo(u * lenis.limit, { immediate: true }));
 if (Q.get('play') === '1') requestAnimationFrame(() => setPlay(true));
 function draw(time) {
+  world.update({ time, camera, bird: bird.position, heat: heatNow });
   if (!post) { renderer.render(scene, camera); return; }
   look.update({ time, heat: heatNow, camera, sunDir: SUN_DIR, blink: Math.max(blinkAt(lifeT), life.eyes),
     breath: breathAt(lifeT) * (0.35 + 0.65 * life.sleep), wind: life.wind * WIND_GAIN * (0.5 + 0.5 * gustAt(time, 0)) });
@@ -605,6 +520,7 @@ function frame(now) {
   draw(now / 1000);
   requestAnimationFrame(frame);
 }
+if (Q.get('far') !== '0') await world.bakeFar(renderer, (f) => { const b = document.getElementById('bar'); if (b) b.style.width = (f * 100).toFixed(1) + '%'; });
 const solveT0 = performance.now();
 solveLegs();                                               // once: each foot on its own ground (before the tail: it moves the body)
 // the claws close on the rock where it falls away under them (after skinning, see fenix-grip.js); ?grip=0 off
@@ -614,7 +530,7 @@ const solveMs = performance.now() - solveT0;                // (to bake into dat
 requestAnimationFrame(frame);
 
 // QA hooks
-window.__op = { THREE, scene, camera, bird, flight, path, timeline, heightAt, surfaceAt, PATH, skinned,
+window.__op = { THREE, scene, camera, bird, flight, path, timeline, heightAt, surfaceAt, PATH, skinned, world,
   setU(uu, time = performance.now() / 1000) { hold = true; u = uu; lifeT = time; const r = place(uu); placeCamera(uu, r.b); shadowFollow(); draw(time); return r; },
   render: (time = performance.now() / 1000) => draw(time), renderer, get post() { return post; }, get look() { return look; }, get embers() { return embers; },
   get tier() { return tier; }, solveMs, tailClearance, footClearance, soleOf, get legAdjTable() { return legAdjTable; }, setLiftSolve(v) { liftSolve = v; }, place, ready: true };
