@@ -62,35 +62,48 @@ const vnoise = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y), xf = x 
 const ridged = (x, y) => { let s = 0, amp = 0.5, f = 1; for (let i = 0; i < 5; i++) { const n = 1 - Math.abs(vnoise(x * f, y * f) * 2 - 1); s += n * n * amp; amp *= 0.5; f *= 2.07; } return s; };
 function mountain(x, z, m, r, sharp) { const d = Math.hypot(x - m.x, z - m.z) / r; return Math.exp(-Math.pow(d, sharp)); }
 const smin = (a, b, k) => { const h = Math.max(0, Math.min(1, 0.5 + 0.5 * (b - a) / k)); return b + (a - b) * h - k * h * (1 - h); };   // smooth min (rounded summit)
+function spire(x, z, m, r, top, seed) {
+  const d = Math.hypot(x - m.x, z - m.z), p = Math.exp(-Math.pow(d / r, 1.05));
+  const ang = Math.atan2(z - m.z, x - m.x);
+  // flanks: ridges and gullies running down the mountain (angular noise), crags, fine rock grain; strongest mid-slope
+  const gully = ridged(Math.cos(ang) * 2.2 + seed, Math.sin(ang) * 2.2 + d * 0.35);
+  const crag = ridged(x * 0.33 + seed, z * 0.33 - seed);
+  const mid = 4 * p * (1 - p);
+  const body = top * 1.08 * p + 2.4 * mid * (gully - 0.35) + 1.4 * crag * p + 0.35 * vnoise(x * 1.7 + seed, z * 1.7) * p;
+  return smin(body, top + 0.35 * vnoise(x * 2.5 + seed, z * 2.5) + 0.2 * vnoise(x * 6, z * 6 + seed), 0.5);
+}
 function heightAt(x, z) {
   let h = 1.6 * ridged(x * 0.035 + 3.1, z * 0.035 - 1.7) + 0.5 * vnoise(x * 0.25, z * 0.25);
-  // the perch: a steep rocky spire with a rounded, rough summit (not a table)
-  const p = mountain(x, z, PEAK, 4.2, 1.05), crag = ridged(x * 0.35 + 7, z * 0.35 - 2);
-  h = Math.max(h, smin(PEAK.top * 1.08 * p + 1.6 * crag * p, PEAK.top + 0.3 * vnoise(x * 3, z * 3), 0.6));
-  // the landing ledge across the valley: a broader crag
-  const l = mountain(x, z, LEDGE, 6.0, 1.3), crag2 = ridged(x * 0.3 + 5, z * 0.3);
-  h = Math.max(h, smin(LEDGE.top * 1.1 * l + 1.4 * crag2 * l, LEDGE.top + 0.25 * vnoise(x * 3 + 9, z * 3), 0.6));
+  h = Math.max(h, spire(x, z, PEAK, 4.4, PEAK.top, 7.3));      // the perch: a rocky spire with a rough, roughly flat summit
+  h = Math.max(h, spire(x, z, LEDGE, 6.0, LEDGE.top, 2.1));    // the landing crag across the valley
   // far ranges all around, for a horizon
   const ring = Math.hypot(x + 6, z + 20);
   h += Math.max(0, ring - 50) * 0.16 * (0.5 + ridged(x * 0.05, z * 0.05));      // lower than the perch: from up there she looks DOWN on the world
   return h;
 }
-{
-  const SIZE = 180, SEG = 260, geo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG); geo.rotateX(-Math.PI / 2); geo.translate(-6, 0, -20);
+// the base terrain (coarse) + two fine patches over the mountains (0.1 unit cells: no facets close to her). Inside a patch the base is
+// pushed 4 cm down so the fine surface covers it.
+const PATCHES = [{ x: PEAK.x, z: PEAK.z, size: 16, seg: 180 }, { x: LEDGE.x, z: LEDGE.z, size: 20, seg: 180 }];
+const inPatch = (x, z) => PATCHES.some((q) => Math.abs(x - q.x) < q.size / 2 - 0.2 && Math.abs(z - q.z) < q.size / 2 - 0.2);
+function terrainMesh(size, seg, cx, cz, lowerInPatches) {
+  const geo = new THREE.PlaneGeometry(size, size, seg, seg); geo.rotateX(-Math.PI / 2); geo.translate(cx, 0, cz);
   const pos = geo.attributes.position, col = new Float32Array(pos.count * 3), c = new THREE.Color();
-  for (let i = 0; i < pos.count; i++) pos.setY(i, heightAt(pos.getX(i), pos.getZ(i)));
+  for (let i = 0; i < pos.count; i++) { const x = pos.getX(i), z = pos.getZ(i); pos.setY(i, heightAt(x, z) - (lowerInPatches && inPatch(x, z) ? 0.04 : 0)); }
   geo.computeVertexNormals();
-  const nrm = geo.attributes.normal, low = new THREE.Color('#1c1218'), rock = new THREE.Color('#3e2420'), lit = new THREE.Color('#7a3e2c'), top = new THREE.Color('#9a6448');
+  const nrm = geo.attributes.normal, low = new THREE.Color('#1c1218'), rock = new THREE.Color('#3e2420'), lit = new THREE.Color('#7a3e2c'), top = new THREE.Color('#9a6448'), dark = new THREE.Color('#24151a');
   for (let i = 0; i < pos.count; i++) {
-    const y = pos.getY(i), slope = 1 - nrm.getY(i);
+    const x = pos.getX(i), z = pos.getZ(i), y = pos.getY(i), slope = 1 - nrm.getY(i);
     c.copy(low).lerp(rock, THREE.MathUtils.smoothstep(y, 0.5, 5)).lerp(lit, THREE.MathUtils.smoothstep(y, 5, 11) * 0.7).lerp(top, THREE.MathUtils.smoothstep(y, 9, 13.5) * 0.6);
-    c.multiplyScalar(0.75 + 0.5 * vnoise(pos.getX(i) * 0.6, pos.getZ(i) * 0.6));
+    c.lerp(dark, THREE.MathUtils.smoothstep(slope, 0.35, 0.8) * 0.55);                                // steep rock faces darker
+    c.multiplyScalar(0.72 + 0.45 * vnoise(x * 0.6, z * 0.6) + 0.18 * (vnoise(x * 3, y * 6) - 0.5));       // grain + horizontal strata
     col.set([c.r, c.g, c.b], i * 3);
   }
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  const terrain = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }));
-  terrain.receiveShadow = true; scene.add(terrain);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }));
+  mesh.receiveShadow = true; scene.add(mesh); return mesh;
 }
+terrainMesh(180, 260, -6, -20, true);
+for (const q of PATCHES) terrainMesh(q.size, q.seg, q.x, q.z, false);
 // drifting embers in the air (cheap points), for scale and depth
 {
   const N = 900, g = new THREE.BufferGeometry(), p = new Float32Array(N * 3);
@@ -137,11 +150,13 @@ const CAM = createTimeline([
   { u: 0.00, cf: 2.7, cr: 1.4,  cu: -0.45, tf: 0.0, tu: 0.25, fov: 34 },    // facing her on the peak, from a little below: she stands against the sky
   { u: 0.08, cf: 2.2, cr: 2.2,  cu: -0.35, tf: 0.0, tu: 0.20, fov: 34 },
   { u: 0.13, cf: 0.6, cr: 3.0,  cu: -0.10, tf: 0.6, tu: 0.20, fov: 36 },    // side, as she crouches
-  { u: 0.20, cf: -1.2, cr: 3.6, cu: 0.30, tf: 1.5, tu: 0.10, fov: 40 },     // she leaps across the frame
-  { u: 0.32, cf: -3.6, cr: 3.2, cu: 0.60, tf: 2.0, tu: -0.30, fov: 42 },    // behind and above: the drop below her
-  { u: 0.46, cf: -4.2, cr: 3.8, cu: 1.40, tf: 2.5, tu: -0.60, fov: 44 },    // the valley below
-  { u: 0.62, cf: -3.2, cr: -4.0, cu: 0.40, tf: 2.0, tu: -0.20, fov: 42 },   // swing to the other side, lower
-  { u: 0.76, cf: -0.8, cr: -4.2, cu: -0.10, tf: 1.5, tu: 0.10, fov: 40 },
+  { u: 0.20, cf: -1.0, cr: 3.2, cu: -0.10, tf: 1.2, tu: 0.30, fov: 40 },    // she leaps across the frame
+  { u: 0.28, cf: -2.4, cr: 2.6, cu: -0.70, tf: 1.4, tu: 0.45, fov: 40 },    // from below and behind: she flies against the sky
+  { u: 0.37, cf: -2.0, cr: 2.8, cu: -0.85, tf: 1.2, tu: 0.45, fov: 40 },
+  { u: 0.45, cf: -3.8, cr: 3.2, cu: 1.10, tf: 2.2, tu: -0.50, fov: 44 },    // a brief look DOWN: the valley under her
+  { u: 0.52, cf: -2.2, cr: 2.4, cu: -0.60, tf: 1.2, tu: 0.40, fov: 40 },    // back under her
+  { u: 0.62, cf: -2.2, cr: -2.8, cu: -0.75, tf: 1.2, tu: 0.40, fov: 40 },   // swing to the other side, still against the sky
+  { u: 0.74, cf: -0.8, cr: -3.0, cu: -0.55, tf: 1.0, tu: 0.35, fov: 39 },
   { u: 0.86, cf: 2.0, cr: -3.2, cu: -0.20, tf: 0.5, tu: 0.20, fov: 37 },    // landing seen from the front-side
   { u: 1.00, cf: 2.8, cr: -1.5, cu: -0.35, tf: 0.0, tu: 0.25, fov: 34 },
 ]);
