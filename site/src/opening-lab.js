@@ -179,7 +179,8 @@ function windDrift(material, { box, centre, follow }) {
 const Hp = PEAK.top, L = LEDGE.top;
 const PATH = [
   [0, Hp + 0.5, 0],            // 0 perched (the bird's centre is ~0.5 above its feet)
-  [0, Hp + 1.4, -2.6],         // 1 the leap: up and out
+  [0, Hp + 0.3, -2.6],         // 1 the leap: OUT and a little down (big birds drop off a perch to gain speed; climbing at once pitched
+                               //   her nose-up and swung the rear through the summit)
   [1.6, Hp + 2.7, -7],         // 2 climbing
   [5, Hp + 3.3, -14],          // 3 over the valley
   [6.2, Hp + 2.6, -22],        // 4 soaring, turning left
@@ -192,19 +193,19 @@ const PATH = [
 const path = createPath(PATH);
 // s = position along the path (0 perch .. 1 ledge). Flat at both ends: she stands still; PCHIP gives zero speed there, smooth in between.
 const KEYS = [
-  { u: 0.00, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.00, sweep: 0.0, legs: +(Q.get('roost') ?? 1), tail: 0.40, fly: 0.00, stretch: 0.0, alert: 0.0, ground: 1.0, pitchBias: 0.00 },   // asleep on the peak, wings folded
-  { u: 0.05, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.00, sweep: 0.0, legs: +(Q.get('roost') ?? 1), tail: 0.40, fly: 0.00, stretch: 0.0, alert: 0.0, ground: 1.0, pitchBias: 0.00 },
+  { u: 0.00, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.00, sweep: 0.0, legs: 0.00, tail: 0.40, fly: 0.00, stretch: 0.0, alert: 0.0, ground: 1.0, pitchBias: 0.00 },   // asleep on the peak, wings folded
+  { u: 0.05, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.00, sweep: 0.0, legs: 0.00, tail: 0.40, fly: 0.00, stretch: 0.0, alert: 0.0, ground: 1.0, pitchBias: 0.00 },
   { u: 0.09, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.16, sweep: 0.0, legs: 0.00, tail: 0.60, fly: 0.00, stretch: 0.0, alert: 0.5, ground: 1.0, pitchBias: 0.00 },   // awake: shakes her plumage out
   { u: 0.105, s: 0.000, beats: 0.0, flap: 0.00, open: 0.10, sweep: 0.0, legs: 0.00, tail: 0.55, fly: 0.00, stretch: 0.0, alert: 1.0, ground: 1.0, pitchBias: 0.00 },   // looks around
   { u: 0.12, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.55, sweep: 0.0, legs: 0.00, tail: 0.70, fly: 0.25, stretch: 0.0, alert: 0.6, ground: 1.0, pitchBias: -0.28 },  // crouch: leans forward, wings half open
-  { u: 0.155, s: 0.030, beats: 0.6, flap: 1.00, open: 1.00, sweep: 0.0, legs: 0.30, tail: 0.80, fly: 0.55, stretch: 0.2, alert: 0.5, ground: 0.0, pitchBias: 0.20 },  // the leap: first big stroke
+  { u: 0.155, s: 0.030, beats: 0.6, flap: 1.00, open: 1.00, sweep: 0.0, legs: 0.30, tail: 0.80, fly: 0.55, stretch: 0.2, alert: 0.5, ground: 0.0, pitchBias: -0.15 },  // the leap: first big stroke, the body level or a touch nose-down (the tail stays up)
   { u: 0.24, s: 0.130, beats: 5.5,  flap: 1.00, open: 1.00, sweep: 0.0, legs: 0.70, tail: 0.50, fly: 0.85, stretch: 0.4, alert: 0.5, ground: 0.0, pitchBias: 0.12 },  // climbing
   { u: 0.40, s: 0.400, beats: 11.0, flap: 0.20, open: 1.00, sweep: 0.0, legs: 0.90, tail: 0.75, fly: 1.00, stretch: 1.0, alert: 0.8, ground: 0.0, pitchBias: 0.00 },  // soaring over the valley
   { u: 0.56, s: 0.630, beats: 12.0, flap: 0.05, open: 1.00, sweep: 0.1, legs: 0.90, tail: 0.85, fly: 1.00, stretch: 1.0, alert: 0.9, ground: 0.0, pitchBias: 0.00 },  // gliding, turning
   { u: 0.70, s: 0.800, beats: 14.0, flap: 0.35, open: 1.00, sweep: 0.0, legs: 0.70, tail: 0.80, fly: 0.95, stretch: 0.7, alert: 0.7, ground: 0.0, pitchBias: 0.04 },  // descending
   { u: 0.81, s: 0.930, beats: 17.0, flap: 0.80, open: 1.00, sweep: 0.0, legs: -0.40, tail: 1.00, fly: 0.55, stretch: 0.2, alert: 0.7, ground: 0.0, pitchBias: 0.15 }, // approach: legs reach forward
-  { u: 0.87, s: 0.990, beats: 20.0, flap: 1.00, open: 1.00, sweep: 0.0, legs: -1.00, tail: 1.00, fly: 0.25, stretch: 0.0, alert: 0.6, ground: 0.20, pitchBias: 0.55 }, // flare: braking strokes
-  { u: 0.905, s: 1.000, beats: 21.2, flap: 0.35, open: 1.00, sweep: 0.0, legs: -0.60, tail: 0.80, fly: 0.10, stretch: 0.0, alert: 0.9, ground: 1.0, pitchBias: 0.25 }, // touchdown
+  { u: 0.87, s: 0.990, beats: 20.0, flap: 1.00, open: 1.00, sweep: 0.0, legs: -1.00, tail: 1.00, fly: 0.25, stretch: 0.0, alert: 0.6, ground: 0.20, pitchBias: 0.35 }, // flare: braking strokes (more nose-up put the tail into the ledge)
+  { u: 0.905, s: 1.000, beats: 21.2, flap: 0.35, open: 1.00, sweep: 0.0, legs: -0.60, tail: 0.80, fly: 0.10, stretch: 0.0, alert: 0.9, ground: 1.0, pitchBias: 0.05 }, // touchdown, nearly level (the tail clears the ledge)
   { u: 0.95, s: 1.000, beats: 21.6, flap: 0.10, open: 0.45, sweep: 0.2, legs: 0.00, tail: 0.55, fly: 0.00, stretch: 0.0, alert: 1.0, ground: 1.0, pitchBias: 0.00 },  // wings come in
   { u: 1.00, s: 1.000, beats: 21.8, flap: 0.00, open: 0.10, sweep: 0.0, legs: 0.00, tail: 0.50, fly: 0.00, stretch: 0.0, alert: 1.0, ground: 1.0, pitchBias: 0.00 },  // standing on the ledge
 ];
@@ -270,7 +271,72 @@ const HEAT = createTimeline([
 const EMBER_RATE = (h) => Math.min(1, Math.max(0.15, (h - 0.3) * 1.1));
 let heatNow = 1;
 const feet = ['Bone_002', 'Bone_009'].map((nm) => flight.bones[flight.byName.get(nm)]);
-const SETTLE = +(Q.get('settle') ?? 0.2), FOOT_MARGIN = 0.012, V = new THREE.Vector3();
+const FOOT_MARGIN = 0.007, V = new THREE.Vector3();
+// the crouch of the sleeping bird: hip, knee, ankle, foot, toes (rad); the angles sum to zero so the toes keep their orientation
+// flat on the rock. Solved by a search over the four free joints: the body comes down 9 cm with the feet where they stood
+flight.CROUCH.splice(0, 5, 0.6, -0.6, -0.4, 0, 0.4);
+// CONTACT is measured on the mesh, not on the toe bones (the claws reach below them): the skinned vertices of the feet and
+// toes (dominant joint = ankle, foot or toes of either leg), a fixed sample of them
+const contactVerts = (() => {
+  const g = skinned.geometry, si = g.attributes.skinIndex, sw = g.attributes.skinWeight, names = skinned.skeleton.bones.map((b) => b.name);
+  const footJ = new Set(['Bone_004', 'Bone_003', 'Bone_002', 'Bone_011', 'Bone_010', 'Bone_009'].map((n) => names.indexOf(n)));
+  const out = [];
+  for (let i = 0; i < si.count; i++) { let b = 0, w = -1; for (let k = 0; k < 4; k++) { const ww = sw.getComponent(i, k); if (ww > w) { w = ww; b = si.getComponent(i, k); } } if (footJ.has(b)) out.push(i); }
+  const step = Math.max(1, Math.floor(out.length / 1500));
+  return out.filter((_, i) => i % step === 0);
+})();
+// THE TAIL never goes into the rock either. On the peak and on the ledge the long plumes hang down behind her over the rock (measured:
+// 6 cm into it asleep, 26 cm at the touchdown, 55 cm sweeping past the peak at the leap). The lift needed is solved ONCE at load for every u (a bisection on
+// P.tailLift against the skinned tail vertices, wind off) and read back as a smooth curve, plus a margin for the wind's sway.
+const tailVerts = (() => {
+  const g = skinned.geometry, si = g.attributes.skinIndex, sw = g.attributes.skinWeight, names = skinned.skeleton.bones.map((b) => b.name);
+  const isTail = names.map((nm) => /^F_tail/.test(nm) || (/^Bone_0(1[4-9]|2\d|3[01])$/.test(nm)));
+  const out = [];
+  for (let i = 0; i < si.count; i++) { let b = 0, w = -1; for (let k = 0; k < 4; k++) { const ww = sw.getComponent(i, k); if (ww > w) { w = ww; b = si.getComponent(i, k); } } if (isTail[b]) out.push(i); }
+  const step = Math.max(1, Math.floor(out.length / 1500));
+  return out.filter((_, i) => i % step === 0);
+})();
+function tailClearance() {
+  bird.updateMatrixWorld(true);
+  let low = Infinity;
+  for (const i of tailVerts) { skinned.getVertexPosition(i, V).applyMatrix4(skinned.matrixWorld); low = Math.min(low, V.y - heightAt(V.x, V.z)); }
+  return low;
+}
+const TAIL_MARGIN = 0.08, TAIL_DU = 0.005, TAIL_MAX = 1.0, TAIL_MAX_GROUND = 1.8;
+let tailLiftTable = null, bodyLiftTable = null, liftSolve = null;
+const readTable = (tb, u) => { if (!tb) return 0; const x = Math.min(1, Math.max(0, u)) / TAIL_DU, i = Math.min(tb.length - 2, Math.floor(x)), f = x - i; return tb[i] * (1 - f) + tb[i + 1] * f; };
+function tailLiftAt(u) { return liftSolve !== null ? liftSolve : readTable(tailLiftTable, u); }
+function bodyLiftAt(u) { return liftSolve !== null ? 0 : readTable(bodyLiftTable, u); }
+function solveTailLift() {
+  const n = Math.round(1 / TAIL_DU) + 1, raw = new Float32Array(n), rawY = new Float32Array(n), keepT = lifeT;
+  lifeT = 10;
+  for (let i = 0; i < n; i++) {
+    const u = i * TAIL_DU;
+    liftSolve = 0; place(u, true, true);                            // every u: at the leap and the touchdown the tail sweeps past the rock too
+    if (tailClearance() >= TAIL_MARGIN) continue;
+    // the tail rises up to TAIL_MAX (beyond that it would stand up unnaturally); what is still missing lifts the whole body
+    // (at the leap the rear swings down through the peak as she pitches up: the tail ROOTS were in the rock)
+    const onGround = timeline.at(u).ground > 0.001, cap = onGround ? TAIL_MAX_GROUND : TAIL_MAX;
+    liftSolve = cap; place(u, true, true);
+    const cMax = tailClearance();
+    if (cMax < TAIL_MARGIN) { raw[i] = cap; if (!onGround) rawY[i] = TAIL_MARGIN - cMax; continue; }   // the body never rises off its feet
+    let lo = 0, hi = cap;
+    for (let it = 0; it < 7; it++) { const mid = (lo + hi) / 2; liftSolve = mid; place(u, true, true); if (tailClearance() >= TAIL_MARGIN) hi = mid; else lo = mid; }
+    raw[i] = hi;
+  }
+  liftSolve = null; lifeT = keepT;
+  // smooth: a running max over +-3 samples (never less than needed), then a light blur (no jerk as u moves)
+  const smooth = (r) => { const mx = r.map((_, i) => { let m = 0; for (let k = -3; k <= 3; k++) m = Math.max(m, r[Math.min(n - 1, Math.max(0, i + k))]); return m; });
+    return mx.map((_, i) => { let s = 0, w = 0; for (let k = -2; k <= 2; k++) { const ww = 3 - Math.abs(k); s += ww * mx[Math.min(n - 1, Math.max(0, i + k))]; w += ww; } return Math.max(r[i], s / w); }); };
+  tailLiftTable = smooth(raw); bodyLiftTable = smooth(rawY);
+}
+/** the lowest point of the feet above the terrain (world units) */
+function footClearance() {
+  bird.updateMatrixWorld(true);                                     // the BONES' world matrices (getVertexPosition reads them), not just the mesh's
+  let low = Infinity;
+  for (const i of contactVerts) { skinned.getVertexPosition(i, V).applyMatrix4(skinned.matrixWorld); low = Math.min(low, V.y - heightAt(V.x, V.z)); }
+  return low;
+}
 
 // ───────────── one frame of the scene as a function of u ─────────────
 const qGround = new THREE.Quaternion(), qAir = new THREE.Quaternion(), fwdH = new THREE.Vector3(), Z = new THREE.Vector3(0, 0, -1);
@@ -282,8 +348,12 @@ let life = { sleep: 0, eyes: 0, shake: 0, wind: 0 };
 // blowing while the scroll rests (the opening is a still frame until the visitor scrolls). The STORY (pose, path, camera) is u.
 let lifeT = performance.now() / 1000;
 const windM = new THREE.Vector3(), qModel = new THREE.Quaternion();
-function place(u, usePlants = true) {
-  if (usePlants && !plants) plants = { start: (place(0, false), feetXZ()), end: (place(KEYS.find((k) => k.ground === 1 && k.u > 0.5).u, false), feetXZ()) };   // where the feet touch, once
+function place(u, usePlants = true, noWind = false) {
+  if (usePlants && !plants) {                                       // where the feet touch, once; and the height she leaps FROM
+    const leapU = KEYS.filter((k) => k.ground === 1 && k.u < 0.5).pop().u;
+    plants = { start: (place(0, false), feetXZ()), end: (place(KEYS.find((k) => k.ground === 1 && k.u > 0.5).u, false), feetXZ()) };
+    place(leapU, false); plants.leapY = bird.position.y; plants.leapU = leapU;
+  }
   const k = timeline.at(u), s = Math.min(1, Math.max(0, k.s)), b = path.at(s);
   // orientation: in the air the path's (pitch + bank); on the ground level, facing where it is heading
   qGround.setFromUnitVectors(Z, heading(b)); qAir.copy(b.quat);
@@ -294,7 +364,7 @@ function place(u, usePlants = true) {
   const lf = LIFE.at(u);
   life = lf;
   const P = {
-    sleep: lf.sleep, shake: lf.shake, shakePh: u * 300, wind: lf.wind * WIND_GAIN, hug: lf.hug, windX: windM.x, windY: windM.y, windZ: windM.z,
+    sleep: lf.sleep, crouch: lf.sleep, shake: lf.shake, tailLift: tailLiftAt(u), shakePh: u * 300, wind: noWind ? 0 : lf.wind * WIND_GAIN, hug: lf.hug, windX: windM.x, windY: windM.y, windZ: windM.z,
     t: lifeT, phase: k.beats, flap: k.flap, open: k.open, sweep: k.sweep, legs: k.legs, tail: k.tail, fly: k.fly, stretch: k.stretch, alert: k.alert,
     bank: b.bank * (1 - k.ground), pitch: b.pitch * (1 - k.ground) + k.pitchBias, pitchRate: b.pitchRate * 0.08 * (1 - k.ground), yawRate: b.yawRate * 0.08 * (1 - k.ground),
     lookYaw: Math.max(-0.5, Math.min(0.5, b.yawRate * 0.04)) * (1 - k.ground), lookPitch: 0, load: Math.max(-1, Math.min(1, b.pitchRate * 0.1)) * (1 - k.ground),
@@ -306,16 +376,22 @@ function place(u, usePlants = true) {
   if (k.ground > 0.001) {                                              // feet on the terrain
     bird.updateMatrixWorld(true);
     // the lowest foot (relative to the ground under it) touches; the other may be a little above
-    let low = Infinity; for (const f of feet) { f.getWorldPosition(V); low = Math.min(low, V.y - heightAt(V.x, V.z)); }
-    bird.position.y += k.ground * (FOOT_MARGIN - low);
-    // asleep she SETTLES: the belly rests on the summit (measured: 0.13 above it with the legs folded; 0.2 hides the folded legs from the front camera), the folded feet go into the rock
-    // under the breast feathers, so she reads as a roosting bird and not one standing on bent legs
-    bird.position.y -= SETTLE * lf.sleep * k.ground;
+    // the lowest point of the feet (mesh) touches the rock: never inside it
+    // (and whatever the ground weight, a foot never goes INTO the rock: at the leap the weight fades while the feet are still on it)
+    if (plants?.leapY !== undefined && u > plants.leapU && u < 0.5 && k.ground < 0.999) {
+      // the LEAP: the weight of the ground eases her from the height she leaps from to the flight path. Pulling her to the rock under
+      // her feet would drag her down as she passes the edge of the summit (the rear swung into the rock); the push-up below keeps the
+      // feet out of it
+      bird.position.y += k.ground * (plants.leapY - bird.position.y);
+      const c = footClearance(); if (c < FOOT_MARGIN) bird.position.y += FOOT_MARGIN - c;
+    } else { const c = footClearance(); bird.position.y += Math.max(k.ground * (FOOT_MARGIN - c), FOOT_MARGIN - c); }
     if (usePlants && k.ground > 0.5) {                                // planted feet: they stay where they touched down
       const pl = u < 0.5 ? plants.start : plants.end, w = THREE.MathUtils.smoothstep(k.ground, 0.5, 1.0), f = feetXZ();
       bird.position.x += w * (pl[0] - f[0]); bird.position.z += w * (pl[1] - f[1]);
+      { const c = footClearance(); bird.position.y += Math.max(k.ground * (FOOT_MARGIN - c), FOOT_MARGIN - c); }   // moved sideways: the rock under the feet changed, touch again
     }
   }
+  bird.position.y += bodyLiftAt(u);                                 // the leap clears the peak (solved with the tail lift)
   return { k, b, P };
 }
 
@@ -410,10 +486,11 @@ function frame(now) {
   draw(now / 1000);
   requestAnimationFrame(frame);
 }
+solveTailLift();                                           // once, now that the scene and the feet are known
 requestAnimationFrame(frame);
 
 // QA hooks
 window.__op = { THREE, scene, camera, bird, flight, path, timeline, heightAt, PATH, skinned,
   setU(uu, time = performance.now() / 1000) { hold = true; u = uu; lifeT = time; const r = place(uu); placeCamera(uu, r.b); shadowFollow(); draw(time); return r; },
   render: (time = performance.now() / 1000) => draw(time), renderer, get post() { return post; }, get look() { return look; }, get embers() { return embers; },
-  get tier() { return tier; }, ready: true };
+  get tier() { return tier; }, tailClearance, footClearance, setLiftSolve(v) { liftSolve = v; }, place, ready: true };

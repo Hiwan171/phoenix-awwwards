@@ -170,8 +170,15 @@ sozinho.** Estado: **dragão e fênix prontos**; tigre e tartaruga aguardam. Tud
   - `P.shake` / `P.shakePh`: a sacudida de penas ao acordar (a fase vem do scroll, como a batida: não treme para sempre se o
     scroll parar ali). `P.hug`: asas coladas ao corpo (de frente a dobra normal as deixava abertas como braços).
   - No shader (`fenix-look.js`, antes do skinning): o peito infla com a respiração e as bordas das penas tremulam com o vento.
-  - Cena: `LIFE` (sleep, eyes, shake, wind, hug) keyed em u. Dormindo, as pernas dobram (`legs 1`) e o corpo ASSENTA 0,2 no
-    topo (`SETTLE`), senão de frente ela parece em pé sobre pernas dobradas. Câmera de frente, centralizada, levemente de cima
+  - Cena: `LIFE` (sleep, eyes, shake, wind, hug) keyed em u. **Nada da fênix entra na montanha** (pedido do usuário: "100% de
+    contato, limpo"): dormindo ela agacha de verdade (`P.crouch`, `CROUCH` = ângulos de quadril/joelho/tornozelo/pé/dedos que
+    somam zero, então os dedos ficam planos onde estavam; o corpo desce 9 cm); o CONTATO é medido na MALHA dos pés (vértices
+    skinned, não o osso: as garras passam dele) e encosta a 7 mm; a CAUDA é erguida (`P.tailLift`) o quanto precisa, resolvido
+    uma vez no load para cada u (bisseção contra os vértices da cauda, margem 8 cm para o vento), e no ar o que faltar ergue o
+    corpo; no salto a referência de altura é de onde ela salta (puxar para a rocha sob os pés arrastava a traseira para dentro do
+    pico ao passar a borda). Coreografia mudada para isso: o salto sai para FRENTE e um pouco para baixo, corpo nivelado
+    (`PATH[1]` y +0,3, `pitchBias` -0,15; antes subia empinada), freada 0,35 e toque 0,05 (antes 0,55 / 0,25: a cauda entrava na
+    saliência). Varredura da cena inteira (u a cada 0,005, 4 instantes de vento, todos os vértices): ponto mais baixo +5 mm. Câmera de frente, centralizada, levemente de cima
     (o vale escuro atrás dá contraste ao brilho), com push-in lento; ela acorda (olhos → cabeça → de pé → sacode → olha) e a
     câmera gira para o lado no agachamento.
   - **O relógio da VIDA (respiração, vento, olhar, piscar, tremulação) agora é o relógio real** (`lifeT`): na abertura ninguém

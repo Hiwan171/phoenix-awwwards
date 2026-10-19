@@ -21,6 +21,8 @@
 //   P.shake     0..1  feathers ruffled and shaken out (waking up): a quick shiver of the body and the plumage; P.shakePh its phase
 //               in cycles (from the timeline, like the wing beat: it plays as the scroll passes and holds when it stops)
 //   P.hug       0..1  folded wings drawn in against the body (seen from the front the plain fold holds them out like arms)
+//   P.tailLift  rad   the tail raised (spread over its root chains): the scene uses it to keep the plumes off the ground
+//   P.crouch    0..1  standing crouch: the legs flex with the feet kept flat where they stand, the body comes down (roosting)
 //
 // Every bone is posed in WORLD space: a rotation delta applied on top of its rest world rotation (so a wing beats about the BODY
 // axis whatever the bones' own axes are), and its local rotation is derived from the posed parent.  A bone with no rule inherits
@@ -34,7 +36,7 @@ const TAU = Math.PI * 2;
 
 export const FLIGHT_DEFAULTS = {
   t: 0, phase: 0, flap: 1, open: 1, sweep: 0, legs: 0, tail: 0.5, bank: 0, pitch: 0, pitchRate: 0, yawRate: 0, lookYaw: 0, lookPitch: 0,
-  fly: 0, stretch: 0.5, alert: 1, rate: 0, load: 0, sleep: 0, wind: 0, windX: 0, windY: 0, windZ: 1, shake: 0, shakePh: 0, hug: 0,
+  fly: 0, stretch: 0.5, alert: 1, rate: 0, load: 0, sleep: 0, wind: 0, windX: 0, windY: 0, windZ: 1, shake: 0, shakePh: 0, hug: 0, crouch: 0, tailLift: 0,
 };
 
 // Poses of a fully folded wing (cl = 1). Angles are added on top of the open pose; they are what the lab's "fold" sliders edit.
@@ -122,7 +124,9 @@ export function gustAt(t, s) {
   }
   return g;
 }
-export const HUG = { down: 0.3, sweep: 0.0 };     // the extra closure of a hugged wing (rad, at the shoulder)
+export const HUG = { down: 0.3, sweep: 0.0 };
+// crouch: extra rotation (rad, + swings backwards) of hip, knee, ankle, foot, toes; solved so the toes keep their orientation
+export const CROUCH = [0, 0, 0, 0, 0];     // the extra closure of a hugged wing (rad, at the shoulder)
 const WING_A = [36, 35, 34, 50], WING_B = [39, 38, 37, 55];     // shoulder, arm, forearm, hand (A at z < 0, B at z > 0)
 const LEGS = [[6, 5, 4, 3, 2], [13, 12, 11, 10, 9]];
 const TAILS = [[19, 18, 17, 16, 15, 14], [25, 24, 23, 22, 21, 20], [31, 30, 29, 28, 27, 26]];
@@ -364,7 +368,8 @@ export function createFenixFlight(model, opts = {}) {
       case 'tail': {
         const idx = r.j;
         ry(A, 0.045 * Math.sin(TAU * (2 * t / 2.5 - 0.5 - 0.09 * idx - 0.12 * r.c)) / r.len * 2 + clampT(-P.yawRate * 0.18, 0.12) / r.len);
-        rz(B, 0.03 * Math.sin(TAU * (2 * t / 2.5 - 0.35 - 0.1 * idx)) / r.len * 2 + clampT(P.pitchRate * 0.2 + P.load * 0.1, 0.12) / r.len);
+        rz(B, 0.03 * Math.sin(TAU * (2 * t / 2.5 - 0.35 - 0.1 * idx)) / r.len * 2 + clampT(P.pitchRate * 0.2 + P.load * 0.1, 0.12) / r.len
+              + P.tailLift / r.len);                                   // lifted (rad over the chain): the scene keeps the tail out of the rock
         qmul(C, A, B);
         if (P.wind > 0 && r.wd) { windQ(D, r.wd, r.wp, base, P, 0.4, 0.1, 0.8, idx, r.len, r.c * 1.7); qmul(E, C, D); return qmul(out, base, E); }
         return qmul(out, base, C);
@@ -385,7 +390,7 @@ export function createFenixFlight(model, opts = {}) {
         const calm = 1 - Math.abs(L) * 0.5;
         const wv = (0.10 + 0.05 * j) * Math.sin(TAU * (P.phase - 0.13 * (j + 1) - (r.li ? 0.08 : 0))) * P.flap * (0.4 + 0.6 * f);
         const sway = (0.07 * Math.sin(TAU * (0.4 * t - 0.15 * j + (r.li ? 0.1 : 0))) + 0.04 * Math.sin(TAU * (0.9 * t - 0.2 * j))) * calm - 0.18 * P.pitchRate * (j + 1) / 5;
-        rz(A, a + sway + wv + clampT(P.load * 0.25, 0.2) / 5);
+        rz(A, a + sway * (1 - 0.8 * P.crouch) + wv + clampT(P.load * 0.25, 0.2) / 5 + P.crouch * CROUCH[j]);
         ry(B, (0.05 + 0.03 * j) * Math.sin(TAU * (0.55 * t - 0.17 * j + (r.li ? 0.3 : 0))) * calm + (r.side) * (0.05 + 0.04 * j) * f * L - P.yawRate * 0.10 * (j + 1) / 5 * (r.side));
         rx(C, (r.side) * (0.02 + 0.015 * j) * Math.sin(TAU * (0.7 * t - 0.2 * j)));
         qmul(D, A, B); qmul(E, D, C); return qmul(out, base, E);
@@ -486,5 +491,5 @@ export function createFenixFlight(model, opts = {}) {
   function reset() {
     for (let i = 0; i < n; i++) { bones[i].quaternion.set(restLQ[i * 4], restLQ[i * 4 + 1], restLQ[i * 4 + 2], restLQ[i * 4 + 3]); bones[i].position.set(restLP[i * 3], restLP[i * 3 + 1], restLP[i * 3 + 2]); }
   }
-  return { pose, reset, bones, byName, feathers, wings, fold, FOLD, SLEEP_THETA, HUG };
+  return { pose, reset, bones, byName, feathers, wings, fold, FOLD, SLEEP_THETA, HUG, CROUCH };
 }
