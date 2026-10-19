@@ -121,6 +121,20 @@ function terrainMesh(size, seg, cx, cz, lowerInPatches) {
   mesh.receiveShadow = true; mesh.layers.enable(LAYER_OCCLUDER); scene.add(mesh); return mesh;
 }
 terrainMesh(180, 260, -6, -20, true);
+/** The height of the RENDERED terrain at (x, z): the triangles of the patch (or base) mesh, interpolated exactly as PlaneGeometry
+ *  splits its cells; the corner heights come from heightAt once and are cached (the terrain is static). This is what contact is
+ *  measured against: it is what the eye sees, and ~100x cheaper than the fractal heightAt per sample. */
+const SURF = [...PATCHES.map((q) => ({ cx: q.x, cz: q.z, size: q.size, seg: q.seg, drop: 0 })), { cx: -6, cz: -20, size: 180, seg: 260, drop: 0 }];
+const surfCache = SURF.map(() => new Map());
+function surfaceAt(x, z) {
+  let k = SURF.length - 1;
+  for (let i = 0; i < PATCHES.length; i++) { const q = SURF[i]; if (Math.abs(x - q.cx) < q.size / 2 && Math.abs(z - q.cz) < q.size / 2) { k = i; break; } }
+  const q = SURF[k], cell = q.size / q.seg, gx = (x - q.cx + q.size / 2) / cell, gz = (z - q.cz + q.size / 2) / cell;
+  const ix = Math.min(q.seg - 1, Math.max(0, Math.floor(gx))), iz = Math.min(q.seg - 1, Math.max(0, Math.floor(gz))), fx = gx - ix, fz = gz - iz;
+  const H = (a, b) => { const key = a * 4096 + b, m = surfCache[k]; let h = m.get(key); if (h === undefined) { h = heightAt(q.cx - q.size / 2 + a * cell, q.cz - q.size / 2 + b * cell); m.set(key, h); } return h; };
+  const ha = H(ix, iz), hb = H(ix, iz + 1), hc = H(ix + 1, iz + 1), hd = H(ix + 1, iz);
+  return fx + fz <= 1 ? ha + (hd - ha) * fx + (hb - ha) * fz : hc + (hb - hc) * (1 - fx) + (hd - hc) * (1 - fz);
+}
 for (const q of PATCHES) terrainMesh(q.size, q.seg, q.x, q.z, false);
 // drifting embers in the air (cheap points), for scale and depth
 {
@@ -277,6 +291,35 @@ const FOOT_MARGIN = 0.007, V = new THREE.Vector3();
 flight.CROUCH.splice(0, 5, 0.6, -0.6, -0.4, 0, 0.4);
 // CONTACT is measured on the mesh, not on the toe bones (the claws reach below them): the skinned vertices of the feet and
 // toes (dominant joint = ankle, foot or toes of either leg), a fixed sample of them
+// Fast CPU skinning of a fixed set of vertices (three's getVertexPosition rebuilds bone x inverse for every influence of every vertex:
+// 1500 foot vertices x 3 calls took 32 ms a frame). Each influence is stored once in its bone's space (boneInverse * bindMatrix *
+// position); per frame:  world = sum w * boneWorld * q  (attached bind mode: matrixWorld * bindMatrixInverse = identity).
+function skinSet(indices) {
+  const g = skinned.geometry, pos = g.attributes.position, si = g.attributes.skinIndex, sw = g.attributes.skinWeight, sk = skinned.skeleton;
+  skinned.updateMatrixWorld(true);
+  const bone = [], w = [], q = [], start = [0], p = new THREE.Vector3(), m = new THREE.Matrix4();
+  for (const i of indices) {
+    for (let k = 0; k < 4; k++) {
+      const ww = sw.getComponent(i, k); if (ww <= 0) continue;
+      const b = si.getComponent(i, k);
+      p.fromBufferAttribute(pos, i).applyMatrix4(skinned.bindMatrix).applyMatrix4(sk.boneInverses[b]);
+      bone.push(b); w.push(ww); q.push(p.x, p.y, p.z);
+    }
+    start.push(bone.length);
+  }
+  const bones = sk.bones;
+  /** calls fn(x, y, z) with the world position of every vertex of the set */
+  return (fn) => {
+    for (let v = 0; v < indices.length; v++) {
+      let x = 0, y = 0, z = 0;
+      for (let k = start[v]; k < start[v + 1]; k++) {
+        const e = bones[bone[k]].matrixWorld.elements, qx = q[k * 3], qy = q[k * 3 + 1], qz = q[k * 3 + 2], ww = w[k];
+        x += ww * (e[0] * qx + e[4] * qy + e[8] * qz + e[12]); y += ww * (e[1] * qx + e[5] * qy + e[9] * qz + e[13]); z += ww * (e[2] * qx + e[6] * qy + e[10] * qz + e[14]);
+      }
+      fn(x, y, z);
+    }
+  };
+}
 const contactVerts = (() => {
   const g = skinned.geometry, si = g.attributes.skinIndex, sw = g.attributes.skinWeight, names = skinned.skeleton.bones.map((b) => b.name);
   const footJ = new Set(['Bone_004', 'Bone_003', 'Bone_002', 'Bone_011', 'Bone_010', 'Bone_009'].map((n) => names.indexOf(n)));
@@ -296,10 +339,11 @@ const tailVerts = (() => {
   const step = Math.max(1, Math.floor(out.length / 1500));
   return out.filter((_, i) => i % step === 0);
 })();
+const tailSkin = skinSet(tailVerts);
 function tailClearance() {
   bird.updateMatrixWorld(true);
   let low = Infinity;
-  for (const i of tailVerts) { skinned.getVertexPosition(i, V).applyMatrix4(skinned.matrixWorld); low = Math.min(low, V.y - heightAt(V.x, V.z)); }
+  tailSkin((x, y, z) => { const c = y - surfaceAt(x, z); if (c < low) low = c; });
   return low;
 }
 const TAIL_MARGIN = 0.08, TAIL_DU = 0.005, TAIL_MAX = 1.0, TAIL_MAX_GROUND = 1.8;
@@ -331,10 +375,11 @@ function solveTailLift() {
   tailLiftTable = smooth(raw); bodyLiftTable = smooth(rawY);
 }
 /** the lowest point of the feet above the terrain (world units) */
+const footSkin = skinSet(contactVerts);
 function footClearance() {
   bird.updateMatrixWorld(true);                                     // the BONES' world matrices (getVertexPosition reads them), not just the mesh's
   let low = Infinity;
-  for (const i of contactVerts) { skinned.getVertexPosition(i, V).applyMatrix4(skinned.matrixWorld); low = Math.min(low, V.y - heightAt(V.x, V.z)); }
+  footSkin((x, y, z) => { const c = y - surfaceAt(x, z); if (c < low) low = c; });
   return low;
 }
 
@@ -490,7 +535,7 @@ solveTailLift();                                           // once, now that the
 requestAnimationFrame(frame);
 
 // QA hooks
-window.__op = { THREE, scene, camera, bird, flight, path, timeline, heightAt, PATH, skinned,
+window.__op = { THREE, scene, camera, bird, flight, path, timeline, heightAt, surfaceAt, PATH, skinned,
   setU(uu, time = performance.now() / 1000) { hold = true; u = uu; lifeT = time; const r = place(uu); placeCamera(uu, r.b); shadowFollow(); draw(time); return r; },
   render: (time = performance.now() / 1000) => draw(time), renderer, get post() { return post; }, get look() { return look; }, get embers() { return embers; },
   get tier() { return tier; }, tailClearance, footClearance, setLiftSolve(v) { liftSolve = v; }, place, ready: true };
