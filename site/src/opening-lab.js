@@ -209,23 +209,38 @@ function shadowFollow() { sun.position.copy(bird.position).addScaledVector(SUN_D
 // ───────────── scroll, UI, loop ─────────────
 const lenis = new Lenis({ lerp: 0.08 });
 let u = +(Q.get('u') ?? 0), autoplay = false, hold = false, last = performance.now();
-const toggleUI = () => { for (const id of ['hud', 'hint', 'bar']) { const el = $(id); el.style.display = el.style.display === 'none' ? '' : 'none'; } };
+const toggleUI = () => { for (const id of ['hud', 'hint', 'bar', 'panel']) { const el = $(id); el.style.display = el.style.display === 'none' ? '' : 'none'; } };
 if (Q.get('ui') === '0') toggleUI();
+// auto-play at an EXACT, constant rate: u = u0 + (now - t0) / duration (wall clock, not accumulated frame steps, so a dropped frame never
+// changes the timing). ?play=1 starts it on load, ?dur=60 sets the duration, ?loop=1 repeats.
+let duration = +(Q.get('dur') ?? 60), playStart = 0, playU0 = 0, looping = Q.get('loop') === '1';
+$('dur').value = String(duration); $('loop').checked = looping;
+const setPlay = (on) => { autoplay = on; $('play').classList.toggle('on', on); $('play').textContent = on ? 'pause (Space)' : 'play (Space)'; if (on) { if (u >= 1) u = 0; playU0 = u; playStart = performance.now(); } };
+$('play').onclick = () => setPlay(!autoplay);
+$('restart').onclick = () => { u = 0; lenis.scrollTo(0, { immediate: true }); setPlay(true); };
+$('dur').onchange = (e) => { duration = +e.target.value; if (autoplay) { playU0 = u; playStart = performance.now(); } };
+$('loop').onchange = (e) => { looping = e.target.checked; };
 addEventListener('keydown', (e) => {
-  if (e.code === 'Space') { e.preventDefault(); autoplay = !autoplay; }
+  if (e.code === 'Space') { e.preventDefault(); setPlay(!autoplay); }
+  if (e.code === 'KeyR') $('restart').click();
   if (e.code === 'KeyH') toggleUI();
   if (e.code === 'KeyC') { freeCam = !freeCam; controls.enabled = freeCam; if (freeCam) controls.target.copy(bird.position); }
 });
+addEventListener('wheel', () => { if (autoplay) setPlay(false); }, { passive: true });     // scrolling by hand takes over
 if (Q.has('u')) requestAnimationFrame(() => lenis.scrollTo(u * lenis.limit, { immediate: true }));
+if (Q.get('play') === '1') requestAnimationFrame(() => setPlay(true));
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  last = now;
   lenis.raf(now);
   if (!hold) {
-    if (autoplay) { u = Math.min(1, u + dt / 45); if (u >= 1) autoplay = false; lenis.scrollTo(u * lenis.limit, { immediate: true }); }
-    else u = Math.min(1, Math.max(0, lenis.limit ? lenis.scroll / lenis.limit : 0));
+    if (autoplay) {
+      u = playU0 + (now - playStart) / (duration * 1000);
+      if (u >= 1) { if (looping) { u = 0; playU0 = 0; playStart = now; } else { u = 1; setPlay(false); } }
+      lenis.scrollTo(u * lenis.limit, { immediate: true });
+    } else u = Math.min(1, Math.max(0, lenis.limit ? lenis.scroll / lenis.limit : 0));
     const r = place(u); placeCamera(u, r.b); shadowFollow();
     $('bar').style.width = (u * 100).toFixed(2) + '%';
-    $('hud').textContent = `u ${u.toFixed(3)}   ${u < 0.13 ? 'perched' : u < 0.16 ? 'leap' : u < 0.81 ? 'flight' : u < 0.905 ? 'landing' : 'on the ledge'}`;
+    $('hud').textContent = `u ${u.toFixed(3)}   ${u < 0.13 ? 'perched' : u < 0.16 ? 'leap' : u < 0.81 ? 'flight' : u < 0.905 ? 'landing' : 'on the ledge'}${autoplay ? '   ' + ((u - playU0) * duration + (playU0 * duration)).toFixed(1) + ' / ' + duration + ' s' : ''}`;
   }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
