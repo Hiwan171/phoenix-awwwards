@@ -267,3 +267,13 @@ centre line: over the back (< BACK_W0 = 0.14) it follows the spine, on the wing 
 wing vertex, smoothstep in between. Covert distances: p10 0.11, p50 0.27, p90 0.43 (most of them lie on the wing).
 Result: armpit (wing x body contact pairs near the shoulders) median 17-18 -> 8-10 cm in flight; wing x wing gaps <= 6.5 cm; stretched
 edges 0.21-0.24 % -> 0.14-0.16 %. Price: tail root x body median 1 -> 4 cm (max 9).
+
+### Landing without foot sliding, open-winged swoop (19/10/2026, after the user's orbit recording)
+- The feet slid 3 body lengths on the ground after touchdown (measured: foot xz while foot y < 6 cm). `flight-demo.js` now holds the
+  position along the path from just before touchdown (`HOLD_W` 8.8, `pathU(u)`: same speed going in, eased to zero), and the lab plants
+  the feet: once `ground` > 0.5 the bird is shifted so the feet's midpoint stays where it was at full contact (a pure function: the plant
+  point is the pose at the touchdown waypoint). Slide 3.05 -> 0.10 units.
+- The swoop (u 0.47-0.53) had half-closed, swept wings that read as stumps from the front: open 0.68 -> 0.92, sweep 0.62 -> 0.28, tail
+  0.15 -> 0.45; pull-up pitchBias 0.28 -> 0.14, tail spread 0.9 -> 0.7.
+- Left as is: the sculpt's tail ends in an upward curl; with the body pitched 35 degrees down it reads as plumes standing behind the head
+  from the front.

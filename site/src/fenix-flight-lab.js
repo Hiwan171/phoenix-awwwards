@@ -74,7 +74,7 @@ const cam = { pos: new THREE.Vector3(), target: new THREE.Vector3() };
 
 let uVel = 0, prevU = 0;                                  // scroll speed in progress per second (smoothed): only used to tame the beat rate
 function paramsAt(uu) {
-  const k = demo.timeline.at(uu), b = demo.path.at(uu);
+  const k = demo.timeline.at(uu), b = demo.path.at(demo.pathU(uu));
   const e = 0.004, dB = (demo.timeline.at(Math.min(1, uu + e)).beats - demo.timeline.at(Math.max(0, uu - e)).beats) / (2 * e);   // beats per unit of progress
   return {
     t: uu * demo.seconds, phase: k.beats, flap: k.flap, open: k.open, sweep: k.sweep, legs: k.legs, tail: k.tail, fly: k.fly, stretch: k.stretch,
@@ -82,7 +82,7 @@ function paramsAt(uu) {
   };
 }
 function applyU(uu) {
-  const P = paramsAt(uu), b = demo.path.at(uu);
+  const P = paramsAt(uu), b = demo.path.at(demo.pathU(uu));
   bird.position.copy(b.pos); bird.quaternion.copy(b.quat);
   bird.rotateX(P.pitch - b.pitch);                       // the timeline's body pitch on top of the path's own (nose up to brake, to pull up)
   flight.pose(P);
@@ -92,9 +92,18 @@ function applyU(uu) {
     bird.updateMatrixWorld(true);
     let low = Infinity; for (const bn of footBones) { bn.getWorldPosition(tmpV); low = Math.min(low, tmpV.y); }
     bird.position.y += P.ground * (FOOT_MARGIN - low);
+    // planted feet: once she stands, the feet stay where they touched down, whatever the posture does (folding the wings and
+    // straightening up used to drag them along the ground). The plant point is the feet's midpoint at full contact (a pure function).
+    if (P.ground > 0.5 && !planting) {
+      if (!plant) { planting = true; const r = applyU(demo.waypointU[9]); planting = false; plant = feetXZ(); applyU(uu); return r.P === P ? r : { P, b }; }
+      const k = Math.min(1, (P.ground - 0.5) / 0.5), w = k * k * (3 - 2 * k), f = feetXZ();
+      bird.position.x += w * (plant[0] - f[0]); bird.position.z += w * (plant[1] - f[1]);
+    }
   }
   return { P, b };
 }
+let plant = null, planting = false;
+function feetXZ() { bird.updateMatrixWorld(true); let x = 0, z = 0; for (const bn of footBones) { bn.getWorldPosition(tmpV); x += tmpV.x / footBones.length; z += tmpV.z / footBones.length; } return [x, z]; }
 function applyManual() {
   bird.position.set(0, 0, 0); bird.quaternion.identity();
   bird.rotation.set(0, 0, 0); bird.rotateX(manual.pitch); bird.rotateZ(-manual.bank);
@@ -121,7 +130,7 @@ function placeCamera(b) {
     return;
   }
   V.freeInit = false; controls.enabled = false;
-  if (camMode === 'chase') chaseCamera(demo.path, u, { back: 2.4 * k, up: 1.0 * k, side: 2.6 * k }, cam);
+  if (camMode === 'chase') chaseCamera(demo.path, demo.pathU(u), { back: 2.4 * k, up: 1.0 * k, side: 2.6 * k }, cam);
   else {
     cam.target.copy(b.pos);
     if (camMode === 'side') cam.pos.copy(b.pos).addScaledVector(V.right, R).addScaledVector(V.up, R * 0.12);
