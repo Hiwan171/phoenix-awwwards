@@ -35,7 +35,7 @@ sun.shadow.mapSize.set(1024, 1024); sun.shadow.camera.near = 0.5; sun.shadow.cam
 Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4 });
 scene.add(sun, sun.target);
 const hemi = new THREE.HemisphereLight(0xffb48a, 0x2a1820, 0.9); scene.add(hemi);
-const camera = new THREE.PerspectiveCamera(38, 1, 0.05, 600);
+const camera = new THREE.PerspectiveCamera(38, 1, 0.05, 2200);
 let post = null, embers = null; const BUF = new THREE.Vector2(), camRight = new THREE.Vector3();
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); post?.setSize(); }
 addEventListener('resize', resize); resize();
@@ -106,13 +106,13 @@ const PATH = [
                                //   steep front slope where one foot hung 12-28 cm above the rock)
   [0, Hp + 0.3, -2.6],         // 1 the leap: OUT and a little down (big birds drop off a perch to gain speed; climbing at once pitched
                                //   her nose-up and swung the rear through the summit)
-  [1.6, Hp + 2.7, -7],         // 2 climbing
-  [5, Hp + 3.3, -14],          // 3 over the valley
-  [6.2, Hp + 2.6, -22],        // 4 soaring, turning left
-  [2.5, CLOUD_Y + 9.0, -29],   // 5 gliding down toward the mist
-  [-7, CLOUD_Y + 7.5, -36],    // 6 low over the mist between the peaks
-  [LEDGE.x + 1.5, L + 2.2, LEDGE.z + 3.0],    // 7 approach
-  [LEDGE.x + 0.2, L + 0.95, LEDGE.z + 0.9],   // 8 flare
+  [2.5, Hp + 2.7, -7],         // 2 climbing
+  [8, Hp + 3.3, -14],          // 3 out over the cloud sea
+  [6, Hp + 2.0, -25],          // 4 soaring, turning back
+  [-4, CLOUD_Y + 9.0, -27],    // 5 gliding down toward the clouds
+  [-13, CLOUD_Y + 7.5, -10],   // 6 low over the cloud sea, past her old peak
+  [LEDGE.x - 3.0, L + 2.2, LEDGE.z - 2.5],    // 7 approach the neighbouring peak (into the sun)
+  [LEDGE.x - 0.7, L + 0.95, LEDGE.z - 0.6],   // 8 flare
   [LEDGE.x, L + 0.5, LEDGE.z],                // 9 touchdown
 ];
 const path = createPath(PATH);
@@ -261,7 +261,7 @@ function tailClearance() {
   tailSkin((x, y, z) => { const c = y - surfaceAt(x, z); if (c < low) low = c; });
   return low;
 }
-const TAIL_MARGIN = 0.08, TAIL_DU = 0.005, TAIL_MAX = 1.0, TAIL_MAX_GROUND = 1.8;
+const TAIL_MARGIN = 0.16, TAIL_DU = 0.005, TAIL_MAX = 1.0, TAIL_MAX_GROUND = 1.8;
 let tailLiftTable = null, bodyLiftTable = null, liftSolve = null;
 const readTable = (tb, u) => { if (!tb) return 0; const x = Math.min(1, Math.max(0, u)) / TAIL_DU, i = Math.min(tb.length - 2, Math.floor(x)), f = x - i; return tb[i] * (1 - f) + tb[i + 1] * f; };
 function tailLiftAt(u) { return liftSolve !== null ? liftSolve : readTable(tailLiftTable, u); }
