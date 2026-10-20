@@ -39,7 +39,7 @@ const TAU = Math.PI * 2;
 
 export const FLIGHT_DEFAULTS = {
   t: 0, phase: 0, flap: 1, open: 1, sweep: 0, legs: 0, tail: 0.5, bank: 0, pitch: 0, pitchRate: 0, yawRate: 0, lookYaw: 0, lookPitch: 0,
-  fly: 0, stretch: 0.5, alert: 1, rate: 0, load: 0, sleep: 0, wind: 0, windX: 0, windY: 0, windZ: 1, shake: 0, shakePh: 0, hug: 0, crouch: 0, tailLift: 0, ground: 0, legAdj: null,
+  fly: 0, stretch: 0.5, alert: 1, rate: 0, load: 0, sleep: 0, wind: 0, windX: 0, windY: 0, windZ: 1, shake: 0, shakePh: 0, hug: 0, crouch: 0, tailLift: 0, plumeLift: 0, ground: 0, legAdj: null,
 };
 
 // Poses of a fully folded wing (cl = 1). Angles are added on top of the open pose; they are what the lab's "fold" sliders edit.
@@ -358,7 +358,10 @@ export function createFenixFlight(model, opts = {}) {
         const chainK = f.region === 'tail' ? Math.min(1, 4 / f.K) : 1;          // long strips: the same TOTAL wave as a short one
         const ruff = f.region === 'tail' ? 0 : -P.shake * (j === 0 ? 0.22 : 0.05) * (0.7 + 0.3 * Math.sin(TAU * 1.07 * P.shakePh + f.p1));   // shaken out: the plumage lifts
         ry(A, f.A * g * flutter * chainK + turn + spread);
-        rz(B, f.A * g * 0.8 * Math.sin(TAU * (ph - f.lagBeat) - 0.4 * j) * fl * chainK + pit + comb + ruff);
+        // Some long plumes attach directly to the spine, so raising only the original tail bones misses them.
+        // Share the opening's terrain-clearance bend over each actual feather chain, keeping its root anchored.
+        const clearanceLift = f.region === 'tail' ? P.plumeLift * spreadK : 0;
+        rz(B, f.A * g * 0.8 * Math.sin(TAU * (ph - f.lagBeat) - 0.4 * j) * fl * chainK + pit + comb + ruff + clearanceLift);
         qmul(C, A, B);
         if (P.wind > 0) {
           // the long tail plumes stream and wave, the crest strands whip, the back feathers lift and settle

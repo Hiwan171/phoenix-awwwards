@@ -1,6 +1,7 @@
+// Restored from 78a8d4f on 20/10/2026 to match "WhatsApp Video 2026-10-20 at 15.40.16.mp4": the original red sunset and two peaks.
 // Dev-only test of the OPENING scene: the phoenix stands with folded wings on a mountain peak, crouches, leaps, flies over the valley
-// and lands on a ledge on the other side, all driven by the scroll (scroll back = rewind). The scenery is a placeholder (procedural
-// mountains + a dusk sky shader), only to judge the choreography and the camera; the real habitat shader comes later.
+// and lands on a ledge on the other side, driven by scroll (scroll back = rewind). Geological terrain, a reflective valley lake
+// and distant ranges surround the original, physically calibrated takeoff and landing perches.
 //   /opening-lab.html          ?m=lite  lite model        ?u=0.3 start at a progress        ?ui=0 no text
 import * as THREE from 'three';
 import Lenis from 'lenis';
@@ -13,15 +14,23 @@ import { createPath, createTimeline } from './beasts/flight-path.js';
 import { applyEyes, blinkAt } from './beasts/fenix-eyes.js';
 import { applyFenixLook } from './beasts/fenix-look.js';
 import { createEmbers } from './beasts/fenix-embers.js';
-import { createFootGrip } from './beasts/fenix-grip.js';
-import { createMountainWorld, heightAt, surfaceAt, PEAK, LEDGE, SUN_DIR, CLOUD_Y } from './worlds/mountain-world.js';
-import { createHeroPost, LAYER_SILHOUETTE, LAYER_OCCLUDER } from './hero-post.js';
+import { installFenixToeRig, createFenixFeet } from './beasts/fenix-feet.js';
+import { createFenixClearance, clearanceAt } from './beasts/fenix-clearance.js';
+import { TAIL_LIFT, BODY_LIFT } from './beasts/opening-clearance-data.js';
+import { createFenixPlumage } from './beasts/fenix-plumage.js';
+import { createOpeningLandscape } from './worlds/opening-landscape.js';
+import { createEmberSky } from './worlds/ember-sky.js';
+import { createHeroPost, LAYER_SILHOUETTE } from './hero-post.js';
 
 const Q = new URLSearchParams(location.search);
 const $ = (id) => document.getElementById(id);
 const TAU = Math.PI * 2;
 // ?look=0: the raw model, no post (A/B);  ?aura=0 no silhouette flames;  ?bloom=0
 const LOOK = Q.get('look') !== '0', SKY_GAIN = +(Q.get('sky') ?? 0.9);
+const WIND_GAIN = THREE.MathUtils.clamp(+(Q.get('wind') ?? 1), 0, 2);
+const WIND = new THREE.Vector3(0.82, 0.08, -0.56).normalize();
+const modelRotation = new THREE.Quaternion(), windLocal = new THREE.Vector3(), cameraRight = new THREE.Vector3();
+let lifeT = 0;
 
 // ───────────── renderer, light ─────────────
 const renderer = new THREE.WebGLRenderer({ canvas: $('gl'), antialias: true, powerPreference: 'high-performance' });
@@ -29,151 +38,111 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
+const HORIZON = new THREE.Color('#d9774a'), ZENITH = new THREE.Color('#1d1a33'), FOG = new THREE.Color('#6e3b40');
+scene.fog = new THREE.FogExp2(FOG, 0.0105);
 scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture; scene.environmentIntensity = 0.35;
+const SUN_DIR = new THREE.Vector3(-0.55, 0.22, -0.8).normalize();
 const sun = new THREE.DirectionalLight(0xffc48a, 3.2); sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024); sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 40; sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.02;
 Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4 });
 scene.add(sun, sun.target);
-const hemi = new THREE.HemisphereLight(0xffb48a, 0x2a1820, 0.9); scene.add(hemi);
-const camera = new THREE.PerspectiveCamera(38, 1, 0.05, 2200);
-let post = null, embers = null; const BUF = new THREE.Vector2(), camRight = new THREE.Vector3();
+scene.add(new THREE.HemisphereLight(0xffb48a, 0x2a1820, 0.9));
+const camera = new THREE.PerspectiveCamera(38, 1, 0.05, 600);
+let post = null, embers = null; const BUF = new THREE.Vector2();
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); post?.setSize(); }
 addEventListener('resize', resize); resize();
 if (LOOK) post = createHeroPost({ renderer, scene, camera, aura: Q.get('aura') !== '0', bloom: Q.get('bloom') !== '0', params: {
   samples: +(Q.get('msaa') ?? 4), scale: +(Q.get('scale') ?? 1), intensity: 0.8, height: 0.2, rim: 0, opaque: 0.4, steps: +(Q.get('steps') ?? 12), occluders: true, bloomStrength: +(Q.get('bs') ?? 0.5), bloomRadius: 0.55, bloomThreshold: +(Q.get('bt') ?? 1.8) } });
 
-// ───────────── the world: worlds/mountain-world.js (mountain1's peaks and cloud sea; she perches on its highest peak) ─────────────
-// heightAt / surfaceAt / PEAK / LEDGE come from there: the field of the shader, ported to JS, so her feet and tail touch it exactly.
-const sceneryDrifts = [];
-const hash = (x, y) => { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); };
+// ───────────── sky: a gradient dome with the setting sun ─────────────
+{
+  const mat = new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    uniforms: { uH: { value: HORIZON }, uZ: { value: ZENITH }, uSun: { value: SUN_DIR } },
+    vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    defines: { LOOK: LOOK ? 1 : 0, SKY_GAIN: SKY_GAIN.toFixed(3) },
+    fragmentShader: `uniform vec3 uH, uZ, uSun; varying vec3 vD;
+      void main(){
+        float h = clamp(vD.y, -0.2, 1.0);
+        vec3 c = mix(uH, uZ, pow(max(h, 0.0), 0.55));
+        c = mix(c, uH * 0.55, smoothstep(0.0, -0.2, h));                 // below the horizon: the haze of the valleys
+        float s = max(dot(normalize(vD), uSun), 0.0);
+        c += vec3(1.0, 0.62, 0.32) * (pow(s, 6.0) * 0.55 + pow(s, 80.0) * 1.2);
+        float disc = smoothstep(0.9993, 0.9997, s);
+        #if LOOK
+        // with the post chain the sky is written in LINEAR light (ACES + sRGB come at the end): the gradient is decoded from the
+        // display values it was tuned in; only the sun's disc stays HDR (it feeds the bloom)
+        c = pow(min(c, vec3(1.0)), vec3(2.2)) * SKY_GAIN + vec3(1.0, 0.85, 0.6) * disc * 6.0;
+        #else
+        c += vec3(1.0, 0.9, 0.7) * disc * 3.0;
+        #endif
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+  });
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 48, 24), mat); sky.renderOrder = -1; scene.add(sky);
+}
+const skyEffects = Q.get('skyfx') === '0' ? null : createEmberSky({ scene, renderer, sunDirection: SUN_DIR,
+  lite: Q.get('m') === 'lite', stars: Q.get('stars') !== '0', comets: Q.get('comets') !== '0',
+  reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches });
+
+// ───────────── terrain: a heightfield known in JS (the feet stand on it) ─────────────
+const landscape = await createOpeningLandscape({ scene, sunDirection: SUN_DIR, lite: Q.get('m') === 'lite',
+  reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, water: Q.get('water') !== '0' });
+const { PEAK, LEDGE, heightAt, surfaceAt, hash } = landscape;
 // drifting embers in the air (cheap points), for scale and depth
 {
-  const N = 900, g = new THREE.BufferGeometry(), p = new Float32Array(N * 3);
+  const N = 360, g = new THREE.BufferGeometry(), p = new Float32Array(N * 3);
   for (let i = 0; i < N; i++) { p[i*3] = (hash(i, 1) - 0.5) * 70 - 6; p[i*3+1] = 3 + hash(i, 2) * 16; p[i*3+2] = (hash(i, 3) - 0.5) * 70 - 20; }
   g.setAttribute('position', new THREE.BufferAttribute(p, 3));
-  const m = new THREE.PointsMaterial({ color: 0xffa060, size: 0.06, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending });
-  windDrift(m, { box: new THREE.Vector3(70, 16, 70), centre: new THREE.Vector3(-6, 11, -20), follow: false });
-  scene.add(new THREE.Points(g, m));
-}
-// fine ash in a box that follows the bird: it streams past her with the gusts (the wind made visible in the close shots)
-const motes = (() => {
-  const N = 700, g = new THREE.BufferGeometry(), p = new Float32Array(N * 3), B = new THREE.Vector3(9, 4, 9);
-  for (let i = 0; i < N; i++) { p[i*3] = (hash(i, 11) - 0.5) * B.x; p[i*3+1] = (hash(i, 12) - 0.5) * B.y; p[i*3+2] = (hash(i, 13) - 0.5) * B.z; }
-  g.setAttribute('position', new THREE.BufferAttribute(p, 3));
-  const m = new THREE.PointsMaterial({ color: 0xffc89a, size: 0.012, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending });
-  const d = windDrift(m, { box: B, centre: new THREE.Vector3(), follow: true });
-  const pts = new THREE.Points(g, m); pts.frustumCulled = false; scene.add(pts);
-  return { update: (t, gust, centre) => d.update(t, gust, centre) };
-})();
-/** Points that drift downwind and wrap around a box (centred on the scenery, or on the bird with follow). The drift is integrated
- *  on the wall clock (a gust pushes them faster), so it is a feel, not part of the scroll-bound story. */
-function windDrift(material, { box, centre, follow }) {
-  const U = { uDrift: { value: new THREE.Vector3() }, uBox: { value: box }, uCentre: { value: centre.clone() } };
-  material.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, U);
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform vec3 uDrift, uBox, uCentre;')
-      .replace('#include <begin_vertex>', `#include <begin_vertex>
-        // wrap the drifted point into the box around the centre (each point keeps its own place in the box)
-        transformed = uCentre + mod(position + uDrift - uCentre + uBox * 0.5, uBox) - uBox * 0.5;
-        transformed.y += sin(position.x * 1.7 + uDrift.x * 0.6) * 0.15;`)
-      // a point right in front of the lens would be a big square: drop it, and fade the near ones in
-      .replace('#include <fog_vertex>', `#include <fog_vertex>
-        vNear = smoothstep(0.6, 1.6, -mvPosition.z);
-        if (-mvPosition.z < 0.6) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);`)
-      .replace('void main() {', 'varying float vNear;\nvoid main() {');
-    sh.fragmentShader = sh.fragmentShader.replace('void main() {', 'varying float vNear;\nvoid main() {')
-      .replace('#include <premultiplied_alpha_fragment>', `#include <premultiplied_alpha_fragment>
-        { float r = length(gl_PointCoord - 0.5) * 2.0; if (r > 1.0) discard; gl_FragColor *= (1.0 - r * r) * vNear; }   // round, soft`);
-  };
-  let last = null;
-  const api = {
-    U,
-    update(t, gust, c) {
-      const dt = last == null ? 0 : Math.min(0.1, Math.max(0, t - last)); last = t;
-      const v = 0.25 + 2.6 * gust;                                     // m/s along the wind
-      U.uDrift.value.addScaledVector(WIND, v * dt);
-      if (follow && c) U.uCentre.value.copy(c);
-    },
-  };
-  sceneryDrifts.push(api);
-  return api;
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffa060, size: 0.025, transparent: true, opacity: 0.38, depthWrite: false, blending: THREE.AdditiveBlending })));
 }
 
 // ───────────── the flight: path + scroll timeline (all pure functions of the progress u) ─────────────
 const Hp = PEAK.top, L = LEDGE.top;
 const PATH = [
-  [0, Hp + 0.5, 0.45],         // 0 perched (the bird's centre is ~0.5 above its feet; 0.3 back from the apex puts her FEET on the summit, not on its
-                               //   steep front slope where one foot hung 12-28 cm above the rock)
-  [0, Hp + 0.3, -2.6],         // 1 the leap: OUT and a little down (big birds drop off a perch to gain speed; climbing at once pitched
-                               //   her nose-up and swung the rear through the summit)
-  [2.5, Hp + 2.7, -7],         // 2 climbing
-  [8, Hp + 3.3, -14],          // 3 out over the cloud sea
-  [6, Hp + 2.0, -25],          // 4 soaring, turning back
-  [-4, CLOUD_Y + 9.0, -27],    // 5 gliding down toward the clouds
-  [-13, CLOUD_Y + 7.5, -10],   // 6 low over the cloud sea, past her old peak
-  [LEDGE.x - 3.0, L + 2.2, LEDGE.z - 2.5],    // 7 approach the neighbouring peak (into the sun)
-  [LEDGE.x - 0.7, L + 0.95, LEDGE.z - 0.6],   // 8 flare
-  [LEDGE.x, L + 0.5, LEDGE.z],                // 9 touchdown
+  [0, Hp + 0.5, 0.45],         // 0 perched: the feet, ahead of the body, stand on the apex rather than its steep front flank
+  [0, Hp + 0.3, -2.6],         // 1 clear the ledge before climbing; pitching up on the summit drove the long tail into the rock
+  [1.6, Hp + 2.7, -7],         // 2 climbing
+  [8, Hp + 5.0, -16],          // 3 over the valley
+  [14, Hp + 11.0, -28],        // 4 soaring, turning left
+  [11, Hp + 9.0, -44],        // 5 gliding down
+  [-2, Hp + 4.0, -48],         // 6
+  [-10.5, L + 2.2, -37],       // 7 approach
+  [-11.8, L + 0.95, -39.1],    // 8 flare
+  [-11.85, L + 0.5, -39.55],   // 9 touchdown: place the soles over the ledge's summit
 ];
 const path = createPath(PATH);
-const world = createMountainWorld({ scene });
-for (const o of world.occluders) o.layers.enable(LAYER_OCCLUDER);
-sun.color.copy(world.sunColor); sun.intensity = 3.4;
-hemi.color.copy(world.skyLight); hemi.groundColor.copy(world.groundLight); hemi.intensity = 1.1;   // ground = the sunset bounce off the cloud sea
 // s = position along the path (0 perch .. 1 ledge). Flat at both ends: she stands still; PCHIP gives zero speed there, smooth in between.
 const KEYS = [
-  { u: 0.00, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.00, sweep: 0.0, legs: 0.00, tail: 0.40, fly: 0.00, stretch: 0.0, alert: 0.0, ground: 1.0, pitchBias: 0.00 },   // asleep on the peak, wings folded
-  { u: 0.05, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.00, sweep: 0.0, legs: 0.00, tail: 0.40, fly: 0.00, stretch: 0.0, alert: 0.0, ground: 1.0, pitchBias: 0.00 },
-  { u: 0.09, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.16, sweep: 0.0, legs: 0.00, tail: 0.60, fly: 0.00, stretch: 0.0, alert: 0.5, ground: 1.0, pitchBias: 0.00 },   // awake: shakes her plumage out
-  { u: 0.105, s: 0.000, beats: 0.0, flap: 0.00, open: 0.10, sweep: 0.0, legs: 0.00, tail: 0.55, fly: 0.00, stretch: 0.0, alert: 1.0, ground: 1.0, pitchBias: 0.00 },   // looks around
+  { u: 0.00, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.00, sweep: 0.0, legs: 0.00, tail: 0.50, fly: 0.00, stretch: 0.0, alert: 1.0, ground: 1.0, pitchBias: 0.00 },   // perched, wings folded
+  { u: 0.07, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.12, sweep: 0.0, legs: 0.00, tail: 0.55, fly: 0.00, stretch: 0.0, alert: 1.0, ground: 1.0, pitchBias: 0.00 },   // looks around, shifts the wings
   { u: 0.12, s: 0.000, beats: 0.0,  flap: 0.00, open: 0.55, sweep: 0.0, legs: 0.00, tail: 0.70, fly: 0.25, stretch: 0.0, alert: 0.6, ground: 1.0, pitchBias: -0.28 },  // crouch: leans forward, wings half open
-  { u: 0.155, s: 0.030, beats: 0.6, flap: 1.00, open: 1.00, sweep: 0.0, legs: 0.30, tail: 0.80, fly: 0.55, stretch: 0.2, alert: 0.5, ground: 0.0, pitchBias: -0.15 },  // the leap: first big stroke, the body level or a touch nose-down (the tail stays up)
+  { u: 0.155, s: 0.030, beats: 0.6, flap: 1.00, open: 1.00, sweep: 0.0, legs: 0.30, tail: 0.80, fly: 0.55, stretch: 0.2, alert: 0.5, ground: 0.0, pitchBias: -0.10 }, // the leap: clear the summit with the first big stroke
   { u: 0.24, s: 0.130, beats: 5.5,  flap: 1.00, open: 1.00, sweep: 0.0, legs: 0.70, tail: 0.50, fly: 0.85, stretch: 0.4, alert: 0.5, ground: 0.0, pitchBias: 0.12 },  // climbing
   { u: 0.40, s: 0.400, beats: 11.0, flap: 0.20, open: 1.00, sweep: 0.0, legs: 0.90, tail: 0.75, fly: 1.00, stretch: 1.0, alert: 0.8, ground: 0.0, pitchBias: 0.00 },  // soaring over the valley
   { u: 0.56, s: 0.630, beats: 12.0, flap: 0.05, open: 1.00, sweep: 0.1, legs: 0.90, tail: 0.85, fly: 1.00, stretch: 1.0, alert: 0.9, ground: 0.0, pitchBias: 0.00 },  // gliding, turning
   { u: 0.70, s: 0.800, beats: 14.0, flap: 0.35, open: 1.00, sweep: 0.0, legs: 0.70, tail: 0.80, fly: 0.95, stretch: 0.7, alert: 0.7, ground: 0.0, pitchBias: 0.04 },  // descending
   { u: 0.81, s: 0.930, beats: 17.0, flap: 0.80, open: 1.00, sweep: 0.0, legs: -0.40, tail: 1.00, fly: 0.55, stretch: 0.2, alert: 0.7, ground: 0.0, pitchBias: 0.15 }, // approach: legs reach forward
-  { u: 0.87, s: 0.990, beats: 20.0, flap: 1.00, open: 1.00, sweep: 0.0, legs: -1.00, tail: 1.00, fly: 0.25, stretch: 0.0, alert: 0.6, ground: 0.20, pitchBias: 0.35 }, // flare: braking strokes (more nose-up put the tail into the ledge)
-  { u: 0.905, s: 1.000, beats: 21.2, flap: 0.35, open: 1.00, sweep: 0.0, legs: -0.60, tail: 0.80, fly: 0.10, stretch: 0.0, alert: 0.9, ground: 1.0, pitchBias: 0.05 }, // touchdown, nearly level (the tail clears the ledge)
+  { u: 0.87, s: 0.990, beats: 20.0, flap: 1.00, open: 1.00, sweep: 0.0, legs: -1.00, tail: 1.00, fly: 0.25, stretch: 0.0, alert: 0.6, ground: 0.20, pitchBias: 0.30 }, // flare: braking strokes, tail clears the ledge
+  { u: 0.905, s: 1.000, beats: 21.2, flap: 0.35, open: 1.00, sweep: 0.0, legs: -0.60, tail: 0.80, fly: 0.10, stretch: 0.0, alert: 0.9, ground: 1.0, pitchBias: 0.04 }, // touchdown: level the body as the feet take weight
   { u: 0.95, s: 1.000, beats: 21.6, flap: 0.10, open: 0.45, sweep: 0.2, legs: 0.00, tail: 0.55, fly: 0.00, stretch: 0.0, alert: 1.0, ground: 1.0, pitchBias: 0.00 },  // wings come in
   { u: 1.00, s: 1.000, beats: 21.8, flap: 0.00, open: 0.10, sweep: 0.0, legs: 0.00, tail: 0.50, fly: 0.00, stretch: 0.0, alert: 1.0, ground: 1.0, pitchBias: 0.00 },  // standing on the ledge
 ];
 const timeline = createTimeline(KEYS);
-// her life on the peak (u): asleep, the eyes open, the head rises, she shakes the feathers out; the wind on the plumage (strong on the
-// ground, mostly hidden by the airflow of the flight)
-const LIFE = createTimeline([
-  { u: 0.000, sleep: 1, eyes: 1, shake: 0, wind: 1.0, hug: 1 },
-  { u: 0.050, sleep: 1, eyes: 1, shake: 0, wind: 1.0, hug: 1 },
-  { u: 0.060, sleep: 0.9, eyes: 0, shake: 0, wind: 1.0, hug: 0.6 },     // the eyes open first ...
-  { u: 0.078, sleep: 0, eyes: 0, shake: 0, wind: 1.0, hug: 0.6 },       // ... then the head rises
-  { u: 0.084, sleep: 0, eyes: 0, shake: 1, wind: 1.0, hug: 0.6 },       // the shake
-  { u: 0.098, sleep: 0, eyes: 0, shake: 0, wind: 1.0, hug: 0.6 },
-  { u: 0.160, sleep: 0, eyes: 0, shake: 0, wind: 0.6, hug: 0 },
-  { u: 0.240, sleep: 0, eyes: 0, shake: 0, wind: 0.2, hug: 0 },
-  { u: 0.800, sleep: 0, eyes: 0, shake: 0, wind: 0.2, hug: 0 },
-  { u: 0.920, sleep: 0, eyes: 0, shake: 0, wind: 0.9, hug: 0 },
-  { u: 1.000, sleep: 0, eyes: 0, shake: 0, wind: 1.0, hug: 0.6 },
-]);
-// the wind of the scene (world): a sunset breeze across the peak, from her right to her left as the opening camera sees her
-const WIND = new THREE.Vector3(1, 0.04, 0.3).normalize();
-const WIND_GAIN = +(Q.get('wind') ?? 1);                 // ?wind=0 no wind on the plumage (A/B)
-const SECONDS = 40;                                        // the clock of the small life-motions over the whole scroll
 // camera, in the bird's heading frame (f forward, r right, up), keyed on u; tf/tu = where it looks (ahead of / above the bird)
 const CAM = createTimeline([
-  { u: 0.00, cf: 8.0, cr: 0.0, cu: 0.2, tf: 0.0, tu: -0.5, fov: 30 },    // FRONT, centred, from a little below and further out: the whole peak, she sleeps on it against the sky (a slow push-in)
-  { u: 0.05, cf: 6.6, cr: 0.0, cu: 0.1, tf: 0.0, tu: -0.35, fov: 30 },
-  { u: 0.085, cf: 2.6, cr: 0.35, cu: -0.20, tf: 0.0, tu: 0.14, fov: 31 },   // she wakes (still almost frontal)
-  { u: 0.11, cf: 2.1, cr: 1.8,  cu: -0.32, tf: 0.0, tu: 0.20, fov: 34 },    // the camera starts round to her side
+  { u: 0.00, cf: 2.7, cr: 1.4,  cu: -0.45, tf: 0.0, tu: 0.25, fov: 34 },    // facing her on the peak, from a little below: she stands against the sky
+  { u: 0.08, cf: 2.2, cr: 2.2,  cu: -0.35, tf: 0.0, tu: 0.20, fov: 34 },
   { u: 0.13, cf: 0.6, cr: 3.0,  cu: -0.10, tf: 0.6, tu: 0.20, fov: 36 },    // side, as she crouches
   { u: 0.20, cf: -1.0, cr: 3.2, cu: -0.10, tf: 1.2, tu: 0.30, fov: 40 },    // she leaps across the frame
-  { u: 0.28, cf: -2.4, cr: 2.6, cu: -0.70, tf: 1.4, tu: 0.45, fov: 40 },    // from below and behind: she flies against the sky
-  { u: 0.37, cf: -2.0, cr: 2.8, cu: -0.85, tf: 1.2, tu: 0.45, fov: 40 },
-  { u: 0.45, cf: -3.8, cr: 3.2, cu: 1.10, tf: 2.2, tu: -0.50, fov: 44 },    // a brief look DOWN: the valley under her
-  { u: 0.52, cf: -2.2, cr: 2.4, cu: -0.60, tf: 1.2, tu: 0.40, fov: 40 },    // back under her
-  { u: 0.62, cf: -2.2, cr: -2.8, cu: -0.75, tf: 1.2, tu: 0.40, fov: 40 },   // swing to the other side, still against the sky
-  { u: 0.74, cf: -0.8, cr: -3.0, cu: -0.55, tf: 1.0, tu: 0.35, fov: 39 },
-  { u: 0.86, cf: 2.0, cr: -3.2, cu: -0.20, tf: 0.5, tu: 0.20, fov: 37 },    // landing seen from the front-side
-  { u: 1.00, cf: 2.8, cr: -1.5, cu: -0.35, tf: 0.0, tu: 0.25, fov: 34 },
+  { u: 0.28, cf: -4.4, cr: 4.8, cu: 1.30, tf: 1.2, tu: -0.20, fov: 44 },
+  { u: 0.37, cf: -7.0, cr: 6.5, cu: 3.00, tf: 1.8, tu: -1.40, fov: 47 },
+  { u: 0.45, cf: -8.0, cr: 6.5, cu: 6.00, tf: -0.3, tu: -3.40, fov: 48 }, // reveal the lake below the flight corridor
+  { u: 0.52, cf: -7.0, cr: 4.5, cu: 5.00, tf: 1.0, tu: -2.20, fov: 46 },
+  { u: 0.62, cf: -6.0, cr: -5.0, cu: 2.70, tf: 1.2, tu: -0.80, fov: 44 },
+  { u: 0.74, cf: -4.0, cr: -4.2, cu: 0.80, tf: 1.0, tu: 0.15, fov: 41 },
+  { u: 0.86, cf: 2.5, cr: -4.0, cu: 0.40, tf: 0.5, tu: 0.10, fov: 38 },
+  { u: 1.00, cf: 3.8, cr: -2.8, cu: 0.70, tf: 0.0, tu: -0.10, fov: 39 }, // quiet final perch within the world
 ]);
 
 // ───────────── the phoenix ─────────────
@@ -184,9 +153,15 @@ let skinned = null;
 model.traverse((o) => { if (o.isMesh || o.isSkinnedMesh) { o.frustumCulled = false; o.castShadow = true; if (o.isSkinnedMesh) skinned = o; if (o.material) { o.material.envMap = scene.environment; o.material.envMapIntensity = 0.45; o.material.metalness = 0.35; } } });
 const holder = new THREE.Group(); holder.rotation.y = -Math.PI / 2; holder.scale.setScalar(1 / 1.7); holder.position.y = -0.85 / 1.7; holder.add(model);
 const bird = new THREE.Group(); bird.add(holder); scene.add(bird);
+const toeRig = Q.get('feet') === '0' ? null : installFenixToeRig({ mesh: skinned });
 const flight = createFenixFlight(model);
+const footContact = toeRig ? createFenixFeet({ mesh: skinned, bird, surfaceAt, rig: toeRig }) : null;
+const clearance = createFenixClearance({ mesh: skinned, bird, surfaceAt });
+let clearanceOverride = null;
 const eyes = applyEyes(skinned.material);
 const look = LOOK ? applyFenixLook(skinned) : null;
+const plumage = Q.get('plumage') === '0' ? null : await createFenixPlumage({ mesh: skinned, variant });
+if (post && plumage) post.setMaskMaterial(plumage.createMaskMaterial());
 if (LOOK) {
   skinned.material.metalness = 0.15; skinned.material.envMapIntensity = 0.35;
   model.traverse((o) => { if (o.isMesh || o.isSkinnedMesh) o.layers.enable(LAYER_SILHOUETTE); });
@@ -194,236 +169,62 @@ if (LOOK) {
 }
 // how hot she burns along the scene (u): calm on the peak, a burst at the leap, full in flight, a flare when she brakes
 const HEAT = createTimeline([
-  { u: 0.00, h: 0.42 }, { u: 0.05, h: 0.42 }, { u: 0.08, h: 0.58 }, { u: 0.10, h: 0.68 }, { u: 0.13, h: 0.95 }, { u: 0.16, h: 1.45 }, { u: 0.24, h: 1.15 }, { u: 0.40, h: 1.0 },
+  { u: 0.00, h: 0.55 }, { u: 0.10, h: 0.65 }, { u: 0.13, h: 0.95 }, { u: 0.16, h: 1.45 }, { u: 0.24, h: 1.15 }, { u: 0.40, h: 1.0 },
   { u: 0.60, h: 0.95 }, { u: 0.80, h: 1.05 }, { u: 0.87, h: 1.35 }, { u: 0.93, h: 0.95 }, { u: 1.00, h: 0.6 },
 ]);
 const EMBER_RATE = (h) => Math.min(1, Math.max(0.15, (h - 0.3) * 1.1));
 let heatNow = 1;
 const feet = ['Bone_002', 'Bone_009'].map((nm) => flight.bones[flight.byName.get(nm)]);
-const FOOT_MARGIN = 0.007, V = new THREE.Vector3();
-// the crouch of the sleeping bird: hip, knee, ankle, foot, toes (rad); the angles sum to zero so the toes keep their orientation
-// flat on the rock. Solved by a search over the four free joints: the body comes down 9 cm with the feet where they stood
-flight.CROUCH.splice(0, 5, 0.6, -0.6, -0.4, 0, 0.4);
-// CONTACT is measured on the mesh, not on the toe bones (the claws reach below them): the skinned vertices of the feet and
-// toes (dominant joint = ankle, foot or toes of either leg), a fixed sample of them
-// Fast CPU skinning of a fixed set of vertices (three's getVertexPosition rebuilds bone x inverse for every influence of every vertex:
-// 1500 foot vertices x 3 calls took 32 ms a frame). Each influence is stored once in its bone's space (boneInverse * bindMatrix *
-// position); per frame:  world = sum w * boneWorld * q  (attached bind mode: matrixWorld * bindMatrixInverse = identity).
-function skinSet(indices) {
-  const g = skinned.geometry, pos = g.attributes.position, si = g.attributes.skinIndex, sw = g.attributes.skinWeight, sk = skinned.skeleton;
-  skinned.updateMatrixWorld(true);
-  const bone = [], w = [], q = [], start = [0], p = new THREE.Vector3(), m = new THREE.Matrix4();
-  for (const i of indices) {
-    for (let k = 0; k < 4; k++) {
-      const ww = sw.getComponent(i, k); if (ww <= 0) continue;
-      const b = si.getComponent(i, k);
-      p.fromBufferAttribute(pos, i).applyMatrix4(skinned.bindMatrix).applyMatrix4(sk.boneInverses[b]);
-      bone.push(b); w.push(ww); q.push(p.x, p.y, p.z);
-    }
-    start.push(bone.length);
-  }
-  const bones = sk.bones;
-  /** calls fn(x, y, z) with the world position of every vertex of the set */
-  return (fn) => {
-    for (let v = 0; v < indices.length; v++) {
-      let x = 0, y = 0, z = 0;
-      for (let k = start[v]; k < start[v + 1]; k++) {
-        const e = bones[bone[k]].matrixWorld.elements, qx = q[k * 3], qy = q[k * 3 + 1], qz = q[k * 3 + 2], ww = w[k];
-        x += ww * (e[0] * qx + e[4] * qy + e[8] * qz + e[12]); y += ww * (e[1] * qx + e[5] * qy + e[9] * qz + e[13]); z += ww * (e[2] * qx + e[6] * qy + e[10] * qz + e[14]);
-      }
-      fn(x, y, z);
-    }
-  };
-}
-const contactVerts = (() => {
-  const g = skinned.geometry, si = g.attributes.skinIndex, sw = g.attributes.skinWeight, names = skinned.skeleton.bones.map((b) => b.name);
-  const footJ = new Set(['Bone_004', 'Bone_003', 'Bone_002', 'Bone_011', 'Bone_010', 'Bone_009'].map((n) => names.indexOf(n)));
-  const out = [];
-  for (let i = 0; i < si.count; i++) { let b = 0, w = -1; for (let k = 0; k < 4; k++) { const ww = sw.getComponent(i, k); if (ww > w) { w = ww; b = si.getComponent(i, k); } } if (footJ.has(b)) out.push(i); }
-  const step = Math.max(1, Math.floor(out.length / 1500));
-  return out.filter((_, i) => i % step === 0);
-})();
-// THE TAIL never goes into the rock either. On the peak and on the ledge the long plumes hang down behind her over the rock (measured:
-// 6 cm into it asleep, 26 cm at the touchdown, 55 cm sweeping past the peak at the leap). The lift needed is solved ONCE at load for every u (a bisection on
-// P.tailLift against the skinned tail vertices, wind off) and read back as a smooth curve, plus a margin for the wind's sway.
-const tailVerts = (() => {
-  const g = skinned.geometry, si = g.attributes.skinIndex, sw = g.attributes.skinWeight, names = skinned.skeleton.bones.map((b) => b.name);
-  const isTail = names.map((nm) => /^F_tail/.test(nm) || (/^Bone_0(1[4-9]|2\d|3[01])$/.test(nm)));
-  const out = [];
-  for (let i = 0; i < si.count; i++) { let b = 0, w = -1; for (let k = 0; k < 4; k++) { const ww = sw.getComponent(i, k); if (ww > w) { w = ww; b = si.getComponent(i, k); } } if (isTail[b]) out.push(i); }
-  const step = Math.max(1, Math.floor(out.length / 1500));
-  return out.filter((_, i) => i % step === 0);
-})();
-const tailSkin = skinSet(tailVerts);
-function tailClearance() {
-  bird.updateMatrixWorld(true);
-  let low = Infinity;
-  tailSkin((x, y, z) => { const c = y - surfaceAt(x, z); if (c < low) low = c; });
-  return low;
-}
-const TAIL_MARGIN = 0.16, TAIL_DU = 0.005, TAIL_MAX = 1.0, TAIL_MAX_GROUND = 1.8;
-let tailLiftTable = null, bodyLiftTable = null, liftSolve = null;
-const readTable = (tb, u) => { if (!tb) return 0; const x = Math.min(1, Math.max(0, u)) / TAIL_DU, i = Math.min(tb.length - 2, Math.floor(x)), f = x - i; return tb[i] * (1 - f) + tb[i + 1] * f; };
-function tailLiftAt(u) { return liftSolve !== null ? liftSolve : readTable(tailLiftTable, u); }
-function bodyLiftAt(u) { return liftSolve !== null ? 0 : readTable(bodyLiftTable, u); }
-function solveTailLift() {
-  const n = Math.round(1 / TAIL_DU) + 1, raw = new Float32Array(n), rawY = new Float32Array(n), keepT = lifeT;
-  lifeT = 10;
-  for (let i = 0; i < n; i++) {
-    const u = i * TAIL_DU;
-    liftSolve = 0; place(u, true, true);                            // every u: at the leap and the touchdown the tail sweeps past the rock too
-    if (tailClearance() >= TAIL_MARGIN) continue;
-    // the tail rises up to TAIL_MAX (beyond that it would stand up unnaturally); what is still missing lifts the whole body
-    // (at the leap the rear swings down through the peak as she pitches up: the tail ROOTS were in the rock)
-    const onGround = timeline.at(u).ground > 0.001, cap = onGround ? TAIL_MAX_GROUND : TAIL_MAX;
-    liftSolve = cap; place(u, true, true);
-    const cMax = tailClearance();
-    if (cMax < TAIL_MARGIN) { raw[i] = cap; if (!onGround) rawY[i] = TAIL_MARGIN - cMax; continue; }   // the body never rises off its feet
-    let lo = 0, hi = cap;
-    for (let it = 0; it < 7; it++) { const mid = (lo + hi) / 2; liftSolve = mid; place(u, true, true); if (tailClearance() >= TAIL_MARGIN) hi = mid; else lo = mid; }
-    raw[i] = hi;
-  }
-  liftSolve = null; lifeT = keepT;
-  // smooth: a running max over +-3 samples (never less than needed), then a light blur (no jerk as u moves)
-  const smooth = (r) => { const mx = r.map((_, i) => { let m = 0; for (let k = -3; k <= 3; k++) m = Math.max(m, r[Math.min(n - 1, Math.max(0, i + k))]); return m; });
-    return mx.map((_, i) => { let s = 0, w = 0; for (let k = -2; k <= 2; k++) { const ww = 3 - Math.abs(k); s += ww * mx[Math.min(n - 1, Math.max(0, i + k))]; w += ww; } return Math.max(r[i], s / w); }); };
-  tailLiftTable = smooth(raw); bodyLiftTable = smooth(rawY);
-}
-// ───────────── FOOT PLACEMENT: each foot on its own ground ─────────────
-// The summit is not flat: with two legs of the same length one foot stood on the rock and the other hung 11-28 cm above it (it
-// looked like she was floating). Each leg is solved on its own: hip, knee and ankle rotate (the foot joint gives the sum back, so
-// the foot keeps its orientation) to bring that foot's SOLE down to the rock, the toes joint follows the slope (heel and claw tips
-// both touch), and the toes do not slide fore/aft. Like the tail, solved ONCE at load per u on the ground and read as a curve.
-const LEG_FOOT = [['Bone_004', 'Bone_003', 'Bone_002'], ['Bone_011', 'Bone_010', 'Bone_009']], LEG_ANKLE = ['Bone_003', 'Bone_010'], LEG_TOES = ['Bone_002', 'Bone_009'];
-const legSkins = LEG_FOOT.map((nmz) => {
-  const g = skinned.geometry, si = g.attributes.skinIndex, sw = g.attributes.skinWeight, names = skinned.skeleton.bones.map((b) => b.name);
-  const set = new Set(nmz.map((n) => names.indexOf(n))), out = [];
-  for (let i = 0; i < si.count; i++) { let b = 0, w = -1; for (let k = 0; k < 4; k++) { const ww = sw.getComponent(i, k); if (ww > w) { w = ww; b = si.getComponent(i, k); } } if (set.has(b)) out.push(i); }
-  return skinSet(out.filter((_, i) => i % 2 === 0));
-});
-const V2 = new THREE.Vector3(), FWD = new THREE.Vector3();
-/** sole of leg li: lowest clearance near the heel (< 40 % of the foot's reach from the foot joint) and near the claw tips (> 60 %),
- *  and where the toes are along her heading */
-function soleOf(li) {
-  bird.updateMatrixWorld(true);
-  const a = flight.bones[flight.byName.get(LEG_ANKLE[li])].getWorldPosition(V2), ax = a.x, az = a.z, pts = [];
-  let dMax = 1e-6;
-  legSkins[li]((x, y, z) => { const d = Math.hypot(x - ax, z - az); pts.push(d, y - surfaceAt(x, z)); if (d > dMax) dMax = d; });
-  let heel = 9, tip = 9;
-  for (let i = 0; i < pts.length; i += 2) { const f = pts[i] / dMax, c = pts[i + 1]; if (f < 0.4 && c < heel) heel = c; if (f > 0.6 && c < tip) tip = c; }
-  FWD.set(0, 0, -1).applyQuaternion(bird.quaternion); FWD.y = 0; FWD.normalize();
-  const t = flight.bones[flight.byName.get(LEG_TOES[li])].getWorldPosition(V2);
-  return { heel, tip, fwd: (t.x - bird.position.x) * FWD.x + (t.z - bird.position.z) * FWD.z };
-}
-const LEG_DU = 0.01, SOLE_MARGIN = 0.006, LEG_ITERS = +(Q.get('legit') ?? 4), LEG_LIM = +(Q.get('leglim') ?? 0.9);
-let legAdjTable = null, legSolve = null;
-const legAdjOut = new Float64Array(10);
-function legAdjAt(u) {
-  if (legSolve !== null) return legSolve;
-  if (!legAdjTable) return null;
-  const x = Math.min(1, Math.max(0, u)) / LEG_DU, i = Math.min(legAdjTable.length - 2, Math.floor(x)), f = x - i;
-  for (let k = 0; k < 10; k++) legAdjOut[k] = legAdjTable[i][k] * (1 - f) + legAdjTable[i + 1][k] * f;
-  return legAdjOut;
-}
-// the free parameters of a leg: (hip +d, foot -d), (knee +d, foot -d), (ankle +d, foot -d), (toes +d)
-const LEG_BASIS = [[1, 0, 0, -1, 0], [0, 1, 0, -1, 0], [0, 0, 1, -1, 0], [0, 0, 0, 0, 1]];
-function solveLegsAt(u) {
-  const adj = new Float64Array(10); legSolve = adj;
-  place(u, true, true);
-  const fwd0 = [soleOf(0).fwd, soleOf(1).fwd];
-  const resid = (li) => { place(u, true, true); const s0 = soleOf(li); return [s0.heel - SOLE_MARGIN, s0.tip - SOLE_MARGIN, (s0.fwd - fwd0[li]) * 2]; };
-  for (let it = 0; it < LEG_ITERS; it++) {
-    for (let li = 0; li < 2; li++) {
-      const r0 = resid(li);
-      if (Math.abs(r0[0]) < 0.002 && Math.abs(r0[1]) < 0.002) continue;
-      // Jacobian by finite differences over the 4 parameters, damped least squares  (J^T J + l I) dp = -J^T r
-      const J = LEG_BASIS.map((bv) => { const d = 0.04; for (let j = 0; j < 5; j++) adj[li * 5 + j] += bv[j] * d; const r1 = resid(li); for (let j = 0; j < 5; j++) adj[li * 5 + j] -= bv[j] * d; return r1.map((x, k) => (x - r0[k]) / d); });
-      const n = 4, A = Array.from({ length: n }, (_, a) => Array.from({ length: n }, (_, b) => J[a].reduce((sum, x, k) => sum + x * J[b][k], 0) + (a === b ? 0.02 : 0)));
-      const g = J.map((col) => -col.reduce((sum, x, k) => sum + x * r0[k], 0));
-      // solve A x = g (Gauss)
-      for (let c = 0; c < n; c++) { let pv = c; for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[pv][c])) pv = r; [A[c], A[pv]] = [A[pv], A[c]]; [g[c], g[pv]] = [g[pv], g[c]];
-        for (let r = c + 1; r < n; r++) { const m = A[r][c] / A[c][c]; for (let k = c; k < n; k++) A[r][k] -= m * A[c][k]; g[r] -= m * g[c]; } }
-      const x = new Array(n).fill(0); for (let c = n - 1; c >= 0; c--) { let v = g[c]; for (let k = c + 1; k < n; k++) v -= A[c][k] * x[k]; x[c] = v / A[c][c]; }
-      const big = Math.max(...x.map(Math.abs)), sc = big > 0.35 ? 0.35 / big : 1;
-      x.forEach((dp, k) => { for (let j = 0; j < 5; j++) adj[li * 5 + j] += LEG_BASIS[k][j] * dp * sc; });
-      for (let j = 0; j < 5; j++) adj[li * 5 + j] = Math.max(-LEG_LIM, Math.min(LEG_LIM, adj[li * 5 + j]));   // a leg, not a contortionist
-    }
-  }
-  legSolve = null;
-  return Array.from(adj);
-}
-function solveLegs() {
-  const n = Math.round(1 / LEG_DU) + 1, keepT = lifeT; lifeT = 10;
-  const tab = Array.from({ length: n }, () => new Array(10).fill(0)), gnd = [];
-  for (let i = 0; i < n; i++) { const u = i * LEG_DU, g = timeline.at(u).ground; gnd.push(g); if (g > 0.999) tab[i] = solveLegsAt(u); }
-  // partly on the ground (taking off / touching down): the nearest standing solution, faded by the ground weight
-  for (let i = 0; i < n; i++) if (gnd[i] <= 0.999 && gnd[i] > 0.001) { let j = i, best = -1; for (let k = 1; k < n && best < 0; k++) { if (i - k >= 0 && gnd[i - k] > 0.999) best = i - k; else if (i + k < n && gnd[i + k] > 0.999) best = i + k; } if (best >= 0) tab[i] = tab[best].map((v) => v * gnd[i]); }
-  legAdjTable = tab; lifeT = keepT;
-}
-/** the lowest point of the feet above the terrain (world units) */
-const footSkin = skinSet(contactVerts);
-function footClearance() {
-  bird.updateMatrixWorld(true);                                     // the BONES' world matrices (getVertexPosition reads them), not just the mesh's
-  let low = Infinity;
-  footSkin((x, y, z) => { const c = y - surfaceAt(x, z); if (c < low) low = c; });
-  return low;
-}
+const FOOT_MARGIN = 0.012, V = new THREE.Vector3();
 
 // ───────────── one frame of the scene as a function of u ─────────────
 const qGround = new THREE.Quaternion(), qAir = new THREE.Quaternion(), fwdH = new THREE.Vector3(), Z = new THREE.Vector3(0, 0, -1);
 const heading = (b) => { fwdH.set(b.fwd.x, 0, b.fwd.z); if (fwdH.lengthSq() < 1e-6) fwdH.set(0, 0, -1); return fwdH.normalize(); };
 let plants = null;
 function feetXZ() { bird.updateMatrixWorld(true); let x = 0, z = 0; for (const f of feet) { f.getWorldPosition(V); x += V.x / feet.length; z += V.z / feet.length; } return [x, z]; }
-let life = { sleep: 0, eyes: 0, shake: 0, wind: 0 };
-// The clock of her LIFE (breathing, wind, gaze, blinks, feather flutter) is the wall clock: she keeps breathing and the wind keeps
-// blowing while the scroll rests (the opening is a still frame until the visitor scrolls). The STORY (pose, path, camera) is u.
-let lifeT = performance.now() / 1000;
-const windM = new THREE.Vector3(), qModel = new THREE.Quaternion();
-function place(u, usePlants = true, noWind = false) {
-  if (usePlants && !plants) {                                       // where the feet touch, once; and the height she leaps FROM
-    const leapU = KEYS.filter((k) => k.ground === 1 && k.u < 0.5).pop().u;
-    plants = { start: (place(0, false), feetXZ()), end: (place(KEYS.find((k) => k.ground === 1 && k.u > 0.5).u, false), feetXZ()) };
-    place(leapU, false); plants.leapY = bird.position.y; plants.leapU = leapU;
+function place(u, usePlants = true) {
+  if (usePlants && !plants) {
+    place(0, false); const start = feetXZ(); footContact?.capture('start');
+    place(1, false); const end = feetXZ(); footContact?.capture('end');
+    place(0.12, false); const leapY = bird.position.y;
+    plants = { start, end, leapY };
+    place(0.12); footContact?.captureRelease('start');
   }
   const k = timeline.at(u), s = Math.min(1, Math.max(0, k.s)), b = path.at(s);
   // orientation: in the air the path's (pitch + bank); on the ground level, facing where it is heading
   qGround.setFromUnitVectors(Z, heading(b)); qAir.copy(b.quat);
   bird.position.copy(b.pos); bird.quaternion.copy(qGround).slerp(qAir, 1 - k.ground);
   bird.rotateX(k.pitchBias);
-  // the wind in the model's frame (the pose works there): through the inverse of the model's world rotation
-  qModel.copy(bird.quaternion).multiply(holder.quaternion).multiply(model.quaternion).invert(); windM.copy(WIND).applyQuaternion(qModel);
-  const lf = LIFE.at(u);
-  life = lf;
+  model.getWorldQuaternion(modelRotation).invert();
+  windLocal.copy(WIND).applyQuaternion(modelRotation);
   const P = {
-    ground: k.ground, legAdj: legAdjAt(u), sleep: lf.sleep, crouch: lf.sleep, shake: lf.shake, tailLift: tailLiftAt(u), shakePh: u * 300, wind: noWind ? 0 : lf.wind * WIND_GAIN, hug: lf.hug, windX: windM.x, windY: windM.y, windZ: windM.z,
     t: lifeT, phase: k.beats, flap: k.flap, open: k.open, sweep: k.sweep, legs: k.legs, tail: k.tail, fly: k.fly, stretch: k.stretch, alert: k.alert,
+    ground: k.ground, wind: WIND_GAIN * (0.24 + 0.12 * k.ground), windX: windLocal.x, windY: windLocal.y, windZ: windLocal.z,
+    tailLift: 0.35 * (clearanceOverride?.tailLift ?? clearanceAt(TAIL_LIFT, u)),
+    plumeLift: clearanceOverride?.tailLift ?? clearanceAt(TAIL_LIFT, u),
     bank: b.bank * (1 - k.ground), pitch: b.pitch * (1 - k.ground) + k.pitchBias, pitchRate: b.pitchRate * 0.08 * (1 - k.ground), yawRate: b.yawRate * 0.08 * (1 - k.ground),
     lookYaw: Math.max(-0.5, Math.min(0.5, b.yawRate * 0.04)) * (1 - k.ground), lookPitch: 0, load: Math.max(-1, Math.min(1, b.pitchRate * 0.1)) * (1 - k.ground),
   };
   flight.pose(P);
-  eyes.set(Math.max(blinkAt(P.t), lf.eyes));
-  heatNow = HEAT.at(u).h * (1 + 0.12 * k.flap * Math.max(0, Math.sin(k.beats * TAU)))    // each downstroke fans the fire
-          * (1 + 0.10 * lf.sleep * breathAt(P.t));                                        // asleep, the embers glow with her breath
+  eyes.set(blinkAt(P.t));
+  heatNow = HEAT.at(u).h * (1 + 0.12 * k.flap * Math.max(0, Math.sin(k.beats * TAU)));   // each downstroke fans the fire
   if (k.ground > 0.001) {                                              // feet on the terrain
     bird.updateMatrixWorld(true);
     // the lowest foot (relative to the ground under it) touches; the other may be a little above
-    // the lowest point of the feet (mesh) touches the rock: never inside it
-    // (and whatever the ground weight, a foot never goes INTO the rock: at the leap the weight fades while the feet are still on it)
-    if (plants?.leapY !== undefined && u > plants.leapU && u < 0.5 && k.ground < 0.999) {
-      // the LEAP: the weight of the ground eases her from the height she leaps from to the flight path. Pulling her to the rock under
-      // her feet would drag her down as she passes the edge of the summit (the rear swung into the rock); the push-up below keeps the
-      // feet out of it
+    if (plants && u > 0.12 && u < 0.5 && k.ground < 0.999) {
+      // Leave the perch from its contact height: sampling the falling flank during takeoff dragged the bird into the summit.
       bird.position.y += k.ground * (plants.leapY - bird.position.y);
-      const c = footClearance(); if (c < FOOT_MARGIN) bird.position.y += FOOT_MARGIN - c;
-    } else { const c = footClearance(); bird.position.y += Math.max(k.ground * (FOOT_MARGIN - c), FOOT_MARGIN - c); }
+    } else {
+      let low = Infinity; for (const f of feet) { f.getWorldPosition(V); low = Math.min(low, V.y - surfaceAt(V.x, V.z)); }
+      bird.position.y += k.ground * (FOOT_MARGIN - low);
+    }
     if (usePlants && k.ground > 0.5) {                                // planted feet: they stay where they touched down
       const pl = u < 0.5 ? plants.start : plants.end, w = THREE.MathUtils.smoothstep(k.ground, 0.5, 1.0), f = feetXZ();
       bird.position.x += w * (pl[0] - f[0]); bird.position.z += w * (pl[1] - f[1]);
-      { const c = footClearance(); bird.position.y += Math.max(k.ground * (FOOT_MARGIN - c), FOOT_MARGIN - c); }   // moved sideways: the rock under the feet changed, touch again
     }
   }
-  bird.position.y += bodyLiftAt(u);                                 // the leap clears the peak (solved with the tail lift)
-  if (usePlants && !noWind) { bird.updateMatrixWorld(true); grip?.update(k.ground); }
+  if (usePlants) footContact?.update({ ground: k.ground, key: u < 0.5 ? 'start' : 'end' });
+  bird.position.y += clearanceOverride?.bodyLift ?? clearanceAt(BODY_LIFT, u);
   return { k, b, P };
 }
 
@@ -436,7 +237,6 @@ function placeCamera(u, b) {
   const c = CAM.at(u), f = heading(b); R.crossVectors(f, UP).normalize();
   camPos.copy(bird.position).addScaledVector(f, c.cf).addScaledVector(R, c.cr).addScaledVector(UP, c.cu);
   camPos.y = Math.max(camPos.y, heightAt(camPos.x, camPos.z) + 0.5);  // never inside the mountain
-  camPos.y = Math.max(camPos.y, CLOUD_Y + 4.2);                     // never inside (or under) the cloud sea
   camTgt.copy(bird.position).addScaledVector(f, c.tf).addScaledVector(UP, c.tu);
   camera.position.copy(camPos); camera.lookAt(camTgt);
   if (Math.abs(camera.fov - c.fov) > 0.01) { camera.fov = c.fov; camera.updateProjectionMatrix(); }
@@ -467,29 +267,27 @@ addEventListener('wheel', () => { if (autoplay) setPlay(false); }, { passive: tr
 if (Q.has('u')) requestAnimationFrame(() => lenis.scrollTo(u * lenis.limit, { immediate: true }));
 if (Q.get('play') === '1') requestAnimationFrame(() => setPlay(true));
 function draw(time) {
-  world.update({ time, camera, bird: bird.position, heat: heatNow });
-  world.renderLive(renderer, camera);
+  skyEffects?.update(lifeT, camera);
+  landscape.update(lifeT, camera);
+  const gust = gustAt(lifeT, 0) * WIND_GAIN;
+  plumage?.update({ time: lifeT, wind: gust * 0.6, direction: WIND });
   if (!post) { renderer.render(scene, camera); return; }
-  look.update({ time, heat: heatNow, camera, sunDir: SUN_DIR, blink: Math.max(blinkAt(lifeT), life.eyes),
-    breath: breathAt(lifeT) * (0.35 + 0.65 * life.sleep), wind: life.wind * WIND_GAIN * (0.5 + 0.5 * gustAt(time, 0)) });
-  const gw = gustAt(time, 0) * life.wind;
-  embers.update(time, EMBER_RATE(heatNow), { x: WIND.x * (0.08 + 0.45 * gw), z: WIND.z * (0.08 + 0.45 * gw) });
+  look.update({ time, heat: heatNow, camera, sunDir: SUN_DIR, blink: blinkAt(lifeT), breath: breathAt(lifeT) * 0.35, wind: gust * 0.36 });
+  embers.update(time, EMBER_RATE(heatNow), { x: WIND.x * gust * 0.3, z: WIND.z * gust * 0.3 });
   embers.setPixelScale(renderer.getDrawingBufferSize(BUF).y, camera.fov);
   // the flames: almost none while she rests (she smoulders), they catch when she leaps and settle again on the ledge
   post.aura.uniforms.uIntensity.value = 0.85 * Math.min(1.3, Math.max(0, (heatNow - 0.5) / 0.55));
   post.aura.uniforms.uHeight.value = 0.07 + 0.11 * Math.min(1.4, heatNow);           // calm licks when perched, tall in flight
-  camRight.setFromMatrixColumn(camera.matrixWorld, 0);
-  post.aura.uniforms.uLean.value = WIND.dot(camRight) * (0.25 + 0.45 * gw) * life.wind * WIND_GAIN;   // the licks lean downwind
-  for (const d of sceneryDrifts) d.update(time, gw * Math.max(0.3, life.wind) * WIND_GAIN, bird.position);
+  cameraRight.setFromMatrixColumn(camera.matrixWorld, 0);
+  post.aura.uniforms.uLean.value = WIND.dot(cameraRight) * gust * 0.18;
   post.render(time);
 }
 // quality governor: start at the best tier and step down while frames run long (a frame over 18 ms with vsync = a missed one).
 // Tiers: MSAA 4 -> 2 -> 0, then a lower render scale (dynamic resolution) and fewer aura steps. Measured on an Intel UHD 620 at
 // 1280x720 (GPU ms, timer queries, interleaved): raw 6-11, full look no MSAA 10-14, MSAA 2 ~17, MSAA 4 ~21; with the browser's own
 // compositing on the same GPU, frames start to miss above ~12 ms. ?msaa= pins the MSAA (no governor), ?scale= the render scale.
-// ls = resolution of the live mountain1 shader (its cost is ~0.25 us a pixel on the UHD 620: it is the first thing to give)
-const TIERS = [{ msaa: 4, steps: 12, scale: 1, ls: 0.4 }, { msaa: 2, steps: 12, scale: 1, ls: 0.33 }, { msaa: 0, steps: 12, scale: 1, ls: 0.27 },
-               { msaa: 0, steps: 12, scale: 1, ls: 0.22 }, { msaa: 0, steps: 10, scale: 0.85, ls: 0.18 }, { msaa: 0, steps: 8, scale: 0.72, ls: 0.15 }];
+const TIERS = [{ msaa: 4, steps: 12, scale: 1 }, { msaa: 2, steps: 12, scale: 1 }, { msaa: 0, steps: 12, scale: 1 },
+               { msaa: 0, steps: 10, scale: 0.85 }, { msaa: 0, steps: 8, scale: 0.72 }];
 let tier = 0, govFrames = [], govSkip = 30, govClean = 0, govOn = LOOK && !Q.has('msaa');
 function governor(dt) {
   if (!govOn || document.hidden) return;
@@ -500,12 +298,11 @@ function governor(dt) {
   const slow = govFrames.filter((d) => d > 18).length / govFrames.length;
   govFrames = [];
   if (slow > 0.1 && tier < TIERS.length - 1) {
-    tier++; post.setSamples(TIERS[tier].msaa); post.aura.uniforms.uSteps.value = TIERS[tier].steps; post.setScale(TIERS[tier].scale); if (world.live && !Q.has('ls')) world.live.scale = TIERS[tier].ls; govSkip = 30;
+    tier++; post.setSamples(TIERS[tier].msaa); post.aura.uniforms.uSteps.value = TIERS[tier].steps; post.setScale(TIERS[tier].scale); govSkip = 30;
     console.info('[opening] quality tier', tier, TIERS[tier]);
   } else if (slow > 0.1 || ++govClean >= 3) govOn = false;      // at the floor, or settled after three clean windows
 }
 function frame(now) {
-  lifeT = now / 1000;
   governor(now - last);
   last = now;
   lenis.raf(now);
@@ -515,24 +312,25 @@ function frame(now) {
       if (u >= 1) { if (looping) { u = 0; playU0 = 0; playStart = now; } else { u = 1; setPlay(false); } }
       lenis.scrollTo(u * lenis.limit, { immediate: true });
     } else u = Math.min(1, Math.max(0, lenis.limit ? lenis.scroll / lenis.limit : 0));
-    const r = place(u); placeCamera(u, r.b); shadowFollow();
     $('bar').style.width = (u * 100).toFixed(2) + '%';
     $('hud').textContent = `u ${u.toFixed(3)}   ${u < 0.13 ? 'perched' : u < 0.16 ? 'leap' : u < 0.81 ? 'flight' : u < 0.905 ? 'landing' : 'on the ledge'}${autoplay ? '   ' + ((u - playU0) * duration + (playU0 * duration)).toFixed(1) + ' / ' + duration + ' s' : ''}`;
   }
-  draw(now / 1000);
+  if (!hold) lifeT = now / 1000;
+  const r = place(u); placeCamera(u, r.b); shadowFollow();
+  draw(lifeT);
   requestAnimationFrame(frame);
 }
-if (Q.get('far') !== '0') await world.bakeFar(renderer, (f) => { const b = document.getElementById('bar'); if (b) b.style.width = (f * 100).toFixed(1) + '%'; });
-const solveT0 = performance.now();
-solveLegs();                                               // once: each foot on its own ground (before the tail: it moves the body)
-// the claws close on the rock where it falls away under them (after skinning, see fenix-grip.js); ?grip=0 off
-const grip = Q.get('grip') === '0' ? null : createFootGrip({ mesh: skinned, feet: LEG_FOOT, joints: LEG_ANKLE, surfaceAt });
-solveTailLift();                                           // once, now that the scene and the feet are known
-const solveMs = performance.now() - solveT0;                // (to bake into data for the site: they depend on u only)
 requestAnimationFrame(frame);
 
 // QA hooks
-window.__op = { THREE, scene, camera, bird, flight, path, timeline, heightAt, surfaceAt, PATH, skinned, world,
-  setU(uu, time = performance.now() / 1000) { hold = true; u = uu; lifeT = time; const r = place(uu); placeCamera(uu, r.b); shadowFollow(); draw(time); return r; },
-  render: (time = performance.now() / 1000) => draw(time), renderer, get post() { return post; }, get look() { return look; }, get embers() { return embers; },
-  get tier() { return tier; }, solveMs, tailClearance, footClearance, soleOf, get legAdjTable() { return legAdjTable; }, setLiftSolve(v) { liftSolve = v; }, place, ready: true };
+window.__op = { THREE, scene, camera, bird, flight, path, timeline, heightAt, surfaceAt, PATH, skinned, feet: footContact, plumage, skyEffects, landscape,
+  setU(uu, time = performance.now() / 1000) { hold = true; clearanceOverride = null; u = THREE.MathUtils.clamp(uu, 0, 1); lifeT = time; const r = place(u); placeCamera(u, r.b); shadowFollow(); draw(time); return r; },
+  render(time = performance.now() / 1000) { lifeT = time; const r = place(u); placeCamera(u, r.b); shadowFollow(); draw(time); return r; },
+  clearance,
+  probe({ progress, time = 8, tailLift = 0, bodyLift = 0 }) {
+    hold = true; u = THREE.MathUtils.clamp(progress, 0, 1); lifeT = time;
+    clearanceOverride = { tailLift, bodyLift }; place(u);
+    return { tailGap: clearance.tailGap(), ground: timeline.at(u).ground, position: bird.position.toArray() };
+  },
+  get u() { return u; }, get lifeT() { return lifeT; }, renderer, get post() { return post; }, get look() { return look; }, get embers() { return embers; },
+  get tier() { return tier; }, ready: true };

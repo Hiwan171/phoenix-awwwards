@@ -1,8 +1,86 @@
 # HANDOFF — Phoenix (projeto Awwwards, meta: Honorable Mention)
 
-Contexto completo para retomar em outra máquina / sessão. **Atualizado em 15/10/2026: a fênix v2 foi REMOVIDA** (leia a
-primeira seção; o resto do arquivo é histórico da fênix antiga, útil como referência técnica).
+Contexto completo para retomar em outra máquina / sessão. **Atualizado em 20/10/2026: paisagem rochosa, lago refletivo, voo ampliado, céu vivo e contatos articulados**
+(leia a primeira seção; as seções seguintes registram o histórico do projeto).
 Quem retoma (Claude ou humano): leia este arquivo, depois `DESIGN-BRIEF.md`.
+
+## 20/10/2026 — paisagem montanhosa e lago
+
+Direção aprovada: montanhas dominantes, vale profundo, água escura refletindo o céu vermelho, travessia e pouso final.
+A abertura integra `worlds/opening-landscape.js`, `opening-rock.js` e `opening-water.js`. Texturas fotográficas locais
+Rock Face / Poly Haven / CC0 (créditos na pasta), terreno em quatro malhas, pedras instanciadas, reflexo planar HDR,
+água recortada pelo relevo, Fresnel, brilho solar e ondulações. Cumes dos apoios conservados e sampler de contato extraído
+para o módulo de paisagem. A malha grossa omite o interior dos apoios finos. Voo ampliado para ~86 m e câmera com revelação
+do lago; envelope da cauda recalculado nos dois LODs. QA específico: `node tools/verify-opening-landscape.mjs`.
+Preview de avaliação que termina no pouso: `/opening-lab.html?play=1&dur=45&ui=0`. Comparação: `?water=0`.
+Mais detalhes e créditos em `HERO-NOTES.md`.
+
+## 20/10/2026 — vida no céu vermelho: cometas em chamas e estrelas pulsantes
+
+O usuário aprovou manter a coloração e a fênix, usando a atmosfera da luta de Radahn como referência para refinar o cenário.
+`site/src/worlds/ember-sky.js` adiciona uma camada celestial à abertura, mantendo o shader do gradiente e a luz existentes.
+
+- Campo de estrelas em posições fixas, pulsações individuais suaves e pontos mais brilhantes com halo. O brilho diminui
+  perto do horizonte e do sol. São 1.000 estrelas na versão web e 620 na lite, em uma chamada de desenho.
+- Quatro trajetórias esparsas de cometas, em direções e profundidades diferentes, com núcleo incandescente, cauda de fogo
+  turbulenta e pequenas brasas. A primeira passagem entra no enquadramento inicial a partir de cerca de dois segundos.
+  O ritmo das passagens usa `lifeT`, independente do scroll, e é determinístico para capturas e inspeção.
+- A camada acompanha a posição da câmera como um céu distante; as direções permanecem no mundo. Fênix e terreno
+  ocluem os efeitos. O HDR alimenta o bloom existente; nenhum passe adicional de tela inteira ou textura externa.
+- Em `prefers-reduced-motion: reduce`, estrelas estáticas e cometas suspensos. Flags: `?skyfx=0`, `?stars=0`, `?comets=0`.
+  QA: `__op.skyEffects.diagnostics()` e `__op.setU(u, tempo)`.
+- `node tools/verify-ember-sky.mjs` passou nas versões web/lite, verificando pulsação por diferença de pixels,
+  movimento com scroll parado, profundidade sobre a plumagem, determinismo, recursos/shaders, viewport vertical e movimento
+  reduzido. Relatório e capturas em `tools/_out/sky-quality/`. Atualização da camada: aproximadamente 0,004–0,005 ms de CPU
+  por quadro nesta máquina (medida isolada; não é o tempo total de renderização).
+
+## 20/10/2026 — apoio dos pés e movimento secundário do hero piloto
+
+O usuário aprovou a abertura vermelha como cena piloto do hero e autorizou ajustes no rig. Mapa e prioridades de
+refinamento em [HERO-NOTES.md](HERO-NOTES.md).
+
+- `fenix-feet.js` estende o esqueleto **apenas na cena de abertura**, sem substituir os GLBs: 24 articulações novas,
+  quatro dedos com três juntas em cada pé; guias em `fenix-toe-guides.js`. Pernas alcançam âncoras independentes, solas
+  seguem a inclinação da rocha e as falanges ajustam o contato por rotação, mantendo o comprimento dos ossos.
+- O terreno do contato é `surfaceAt`, a interpolação dos triângulos que aparecem na tela. A postura inicial e o pouso
+  foram deslocados discretamente para pôr as solas sobre os cumes. Os picos e a câmera cinematográfica foram mantidos.
+- `P.ground` trava pernas e bacia enquanto apoiadas. Vento, respiração, olhar e piscar usam `lifeT` contínuo; posição,
+  câmera e batidas usam o progresso `u`. A fênix continua viva quando o scroll para.
+- Na saída do pico, o apoio libera a perna a partir da última pose firme de impulso (`u=0.12`), interpolando as rotações
+  até a pose aérea. O IK deixa de perseguir a âncora na rocha durante essa liberação: isso evita a inversão de dobra que
+  fazia o tornozelo parecer uma mola. O teste de navegador também verifica rotações das juntas em passos de `0.00025` de u.
+- As camadas das costas haviam perdido seus pesos `F_back` ao serem ligadas à coluna. `fenix-plumage.js` recupera apenas
+  sua identificação nos pequenos arquivos `fenix-plumage-{web,lite}.bin` e move partes livres com deslocamento limitado;
+  mantém as raízes e cópias em pontos de contato presas, e replica o movimento na sombra e na máscara das chamas.
+- Folga da cauda calculada fora do runtime em `opening-clearance-data.js`, para os dois LODs e várias fases de vento.
+  `fenix-flight.js` ganhou `plumeLift`, desligado por padrão, para as plumas ligadas diretamente à coluna. A decolagem
+  deixa o cume antes de subir e o corpo nivela ao pousar, evitando empurrar a cauda contra a rocha.
+- Comparações: `?feet=0`, `?wind=0` e `?plumage=0`. QA: `__op.feet.diagnostics()`, `__op.plumage`, `__op.clearance.tailGap()`.
+  `__op.setU(u, tempo)` congela história e vida; `__op.render(tempo)` avança a vida naquele progresso.
+
+Ferramentas: `node tools/verify-opening.mjs` (navegador); `node tools/meshy-test/rig-toes.mjs` (auditoria do rig, saída GLB
+opcional); `node tools/meshy-test/verify-plumage.mjs` (deformação das camadas). Recalcular a folga se mudar cenário, rig ou
+trajetória: com Vite ativo, `node tools/bake-opening-clearance.mjs`. Metadados das camadas podem ser reproduzidos com
+`node tools/meshy-test/bake-plumage.mjs`, que requer o intermediário local `model/meshy-test/Fenix_rig.glb`.
+
+Verificação final: web e lite aprovadas no Edge/D3D11, 1280×720, sem erros de JavaScript, shader ou recursos. Pés e bacia
+sem deriva nas amostras de oito segundos; a volta pelo scroll reproduz as mesmas matrizes. Folga mínima da cauda nas poses
+conferidas: 10,3 mm na web e 12,0 mm na lite. A comparação verifica também os vértices dos dedos, não só os ossos. Os pesos
+normalizados de 8 bits são conferidos dentro da precisão de quantização. Relatório/capturas em `tools/_out/opening-quality/`.
+O build com as entradas principal e abertura também passou.
+
+## 20/10/2026 — restaurada a abertura do vídeo, com o fundo vermelho
+
+A pedido do usuário, `site/src/opening-lab.js` voltou à versão de `78a8d4f`, comparada visualmente com o vídeo local
+`WhatsApp Video 2026-10-20 at 15.40.16.mp4` (gravação de 19/10, às 12:22). A cena tem o shader simples do céu vermelho,
+sol baixo, dois picos procedurais e a fênix inicialmente em pé, que salta, voa pelo vale e pousa no outro pico.
+Essa abertura substitui a versão com o mundo `mountain1` cinzento e a fênix adormecida.
+
+- Abrir `/opening-lab.html?play=1&dur=30&loop=1` para reproduzir como no vídeo, em loop; `&ui=0` esconde os controles.
+- Espaço pausa/continua, R reinicia, scroll assume o voo manual, H alterna os controles e C libera a câmera.
+- O arquivo recupera cenário, iluminação, trajetória, câmera e contato dos pés daquela versão em conjunto. Os modelos e
+  controladores compartilhados atuais continuam compatíveis. A rota independente `/ascension.html` continua separada.
+- QA: `window.__op.ready`, `__op.setU(u, tempo)` e `__op.render(tempo)`. `setU` congela o progresso; recarregar para voltar ao autoplay.
 
 ## 15/10/2026 — virada: as feras seguem o estilo do dragão
 
