@@ -12,11 +12,14 @@
 //   * mist in the valleys: an exponential height fog (analytic along the ray), coloured by the panorama.
 import * as THREE from 'three';
 import { bakeMountainPanoramas, PANO_LAT_TOP } from './mountain-panorama.js';
+import { createMountainLive } from './mountain-live.js';
+// ?live=0: the old look (our own shading of the field); default: the shader itself, live, from our camera
+export const LIVE = !(globalThis.location && new URLSearchParams(location.search).get('live') === '0');
 
 export const K = 30;                       // metres per shader unit
 // her perch is NOT the field's origin (a perfect cone: every octave crosses zero there) but a natural peak of it, at FIELD_O
 export const FIELD_O = { x: 0.5348, z: 1.4316 };
-export const KY = +(globalThis.location ? new URLSearchParams(location.search).get('ky') ?? 1.7 : 1.7) * K;   // metres per shader unit in HEIGHT: the peaks taller and steeper than the shader's (Chinese-painting spires)
+export const KY = +(globalThis.location ? new URLSearchParams(location.search).get('ky') ?? (LIVE ? 1 : 1.7) : 1) * K;   // metres per shader unit in HEIGHT: the peaks taller and steeper than the shader's (Chinese-painting spires)
 export const Y0 = 19 + 0.1204 * KY;        // world height of the field's origin (so her peak's tip is at ~19 m)
 export const MIST_Y = Y0 - 0.5 * KY;        // the top of the valley mist (the cloud sea between the peaks)
 export const CLOUD_Y = MIST_Y;             // (name used by the scene for the cloud level)
@@ -111,7 +114,15 @@ vec3 mwPano(vec3 d) {
   tint = mix(tint, mix(vec3(1.0, 0.80, 0.62), vec3(1.25, 0.70, 0.36), to), smoothstep(0.25, 0.85, lum));
   return tint * (lum / (1.0 + 0.6 * lum) * 1.25) * mix(0.85, 1.25, to);
 }
-uniform float uCloudY, uCloudT;
+uniform float uCloudY, uCloudT, uLiveOn, uLiveGain, uLiveMix; uniform sampler2D uLive, uLiveHi;
+// the live shader at a screen position, graded darker and colder (sombre): display -> linear, shadows pushed to blue-violet
+vec3 mwLive(vec2 uv) {
+  vec3 c = pow(mix(texture2D(uLive, uv).rgb, texture2D(uLiveHi, uv).rgb, uLiveMix), vec3(2.2));
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  vec3 cold = c * vec3(0.78, 0.84, 1.08);
+  c = mix(cold, c, smoothstep(0.05, 0.5, l));                        // the darks colder, the lit haze keeps its warmth
+  return c * uLiveGain;
+}
 float mwH(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 float mwN(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(mix(mwH(i), mwH(i + vec3(1,0,0)), f.x), mix(mwH(i + vec3(0,1,0)), mwH(i + vec3(1,1,0)), f.x), f.y),
@@ -145,15 +156,15 @@ vec3 mwCloud(vec3 eye, vec3 dir, out vec2 hitXZ, out float dist) {
 export function createMountainWorld({ scene }) {
   const U = { uPanoA: { value: null }, uPanoB: { value: null }, uPanoMix: { value: 0 }, uPanoOn: { value: 0 }, uMwSun: { value: SUN_DIR.clone() },
     uMwCam: { value: new THREE.Vector3() }, uMwTime: { value: 0 }, uMistY: { value: MIST_Y },
-    uCloudY: { value: MIST_Y }, uCloudT: { value: 0 },
+    uCloudY: { value: MIST_Y }, uCloudT: { value: 0 }, uLiveOn: { value: LIVE ? 1 : 0 }, uLive: { value: null }, uLiveHi: { value: null }, uLiveMix: { value: 0 }, uLiveGain: { value: +(globalThis.location ? new URLSearchParams(location.search).get('lg') ?? 0.55 : 0.55) },
     uSummitA: { value: new THREE.Vector3(PEAK.x, PEAK.z, PEAK.r) }, uSummitB: { value: new THREE.Vector3(LEDGE.x, LEDGE.z, LEDGE.r) } };
   const occluders = [];
 
   // ───────── sky: our sunset above the horizon, the baked mountains below ─────────
   const skyMat = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false, uniforms: U,
-    vertexShader: 'varying vec3 vD; void main(){ vD = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-    fragmentShader: /* glsl */`uniform float uMwTime; uniform vec3 uMwCam; varying vec3 vD;
+    vertexShader: 'varying vec3 vD; varying vec4 vClip; void main(){ vD = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); vClip = gl_Position; }',
+    fragmentShader: /* glsl */`uniform float uMwTime; uniform vec3 uMwCam; varying vec3 vD; varying vec4 vClip;
       ${GLSL_PANO}
       float h1(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
       float n3(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
@@ -186,6 +197,18 @@ export function createMountainWorld({ scene }) {
           cl = mix(cl, haze, 1.0 - exp(-hd * 0.0016));
           c = mix(c, cl, smoothstep(0.0, -0.004, h));
         }
+        if (uLiveOn > 0.5) {
+          // the shader below and at the horizon (its haze band); above, a sombre dusk (the shader's sky is a flat white glow)
+          vec3 lv = mwLive(vClip.xy / vClip.w * 0.5 + 0.5);
+          vec3 dusk = mix(vec3(0.11, 0.10, 0.12), vec3(0.012, 0.014, 0.026), smoothstep(0.04, 0.55, h));
+          dusk += vec3(0.30, 0.16, 0.08) * pow(max(sd, 0.0), 6.0) * (1.0 - smoothstep(0.0, 0.35, h));      // a dull warm patch where the sun set
+          if (h > 0.0) {
+            vec2 q = d.xz / (h + 0.12);
+            float ci = 0.55 * n3(vec3(q.x * 1.3 + uMwTime * 0.004, q.y * 5.0, 0.5)) + 0.3 * n3(vec3(q.x * 2.7, q.y * 10.0, 1.7)) + 0.15 * n3(vec3(q * 6.0, 3.3));
+            dusk = mix(dusk, dusk * 1.8 + vec3(0.02, 0.018, 0.02), smoothstep(0.5, 0.85, ci) * (1.0 - smoothstep(0.3, 0.7, h)) * 0.6);   // dark cloud banks
+          }
+          c = mix(lv, dusk, smoothstep(0.03, 0.2, h));
+        }
         gl_FragColor = vec4(c, 1.0);
       }`,
   });
@@ -198,9 +221,10 @@ export function createMountainWorld({ scene }) {
   rockMat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vMwW;')
-      .replace('#include <project_vertex>', '#include <project_vertex>\nvMwW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvMwW = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvMwClip = gl_Position;')
+      .replace('#include <common>', '#include <common>\nvarying vec4 vMwClip;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vMwW;\nuniform vec3 uMwCam, uSummitA, uSummitB; uniform float uMistY, uMwTime;\n${GLSL_PANO}
+      .replace('#include <common>', `#include <common>\nvarying vec3 vMwW; varying vec4 vMwClip;\nuniform vec3 uMwCam, uSummitA, uSummitB; uniform float uMistY, uMwTime;\n${GLSL_PANO}
         float r1(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
         float rn(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
           return mix(mix(mix(r1(i), r1(i + vec3(1,0,0)), f.x), mix(r1(i + vec3(0,1,0)), r1(i + vec3(1,1,0)), f.x), f.y),
@@ -255,6 +279,7 @@ export function createMountainWorld({ scene }) {
         }`)
       .replace('#include <fog_fragment>', `
         {
+          vec3 litC = gl_FragColor.rgb;
           vec3 d = vMwW - uMwCam; float dist = length(d); vec3 dir = d / max(dist, 1e-3);
           float to = mwToward(dir);
           // aerial perspective: the colour of the sky at the horizon in this direction (warm toward the sun, violet away)
@@ -273,6 +298,12 @@ export function createMountainWorld({ scene }) {
             col = mix(col, cloud * 0.9, wisp * (1.0 - inside));
           }
           gl_FragColor.rgb = mix(col, haze, clamp(aerial, 0.0, 1.0));
+          if (uLiveOn > 0.5) {
+            // the shader's own colour of this rock (it draws the same peak behind the mesh), with the mesh's crisp light on it
+            vec3 lv = mwLive(vMwClip.xy / vMwClip.w * 0.5 + 0.5);
+            float ll = dot(litC, vec3(0.2126, 0.7152, 0.0722));
+            gl_FragColor.rgb = lv * (0.45 + 1.1 * smoothstep(0.0, 0.10, ll));
+          }
         }`);
   };
   rockMat.customProgramCacheKey = () => 'mw-rock-3';
@@ -309,11 +340,17 @@ export function createMountainWorld({ scene }) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setIndex(idx); geo.computeVertexNormals();
     // no shadows on the range (her shadow only ever falls on the summits, which are the patches): the PCF lookups cost ~3 ms
-    const mesh = new THREE.Mesh(geo, rockMatFar); mesh.receiveShadow = false; mesh.frustumCulled = false; scene.add(mesh); occluders.push(mesh);
+    // live: the range only writes DEPTH (it hides her behind a peak; the picture is the shader's), with a trivial material
+    const mesh = new THREE.Mesh(geo, LIVE ? new THREE.MeshBasicMaterial({ colorWrite: false }) : rockMatFar); mesh.receiveShadow = false; mesh.frustumCulled = false; scene.add(mesh); occluders.push(mesh);
   }
   for (const q of PATCHES) terrainMesh(q.x, q.z, q.size, q.size, q.seg, q.seg, false);
 
+  const live = LIVE ? createMountainLive({ K, KY, Y0, FIELD_O, scale: +(globalThis.location ? new URLSearchParams(location.search).get('ls') ?? 0.25 : 0.25), hiScale: +(globalThis.location ? new URLSearchParams(location.search).get('lhs') ?? 0.6 : 0.6) }) : null;
+  if (live) { U.uLive.value = live.out.lo; U.uLiveHi.value = live.out.hi; }
   return {
+    live,
+    /** the live shader pass: call once a frame before the scene is drawn */
+    renderLive(renderer, camera) { if (live) { live.render(renderer, camera); U.uLiveMix.value = live.out.mix; } },
     heightAt, surfaceAt, PEAK, LEDGE, CLOUD_Y, MIST_Y, SUN_DIR, occluders, sky, uniforms: U,
     sunColor: new THREE.Color(1.0, 0.70, 0.45), skyLight: new THREE.Color(0.40, 0.36, 0.62), groundLight: new THREE.Color(0.95, 0.70, 0.62),   // ground = the sunlit cloud sea below
     /** bakes the far world from her perch (async: show the loader). onProgress(0..1) */

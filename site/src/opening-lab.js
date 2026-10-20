@@ -468,6 +468,7 @@ if (Q.has('u')) requestAnimationFrame(() => lenis.scrollTo(u * lenis.limit, { im
 if (Q.get('play') === '1') requestAnimationFrame(() => setPlay(true));
 function draw(time) {
   world.update({ time, camera, bird: bird.position, heat: heatNow });
+  world.renderLive(renderer, camera);
   if (!post) { renderer.render(scene, camera); return; }
   look.update({ time, heat: heatNow, camera, sunDir: SUN_DIR, blink: Math.max(blinkAt(lifeT), life.eyes),
     breath: breathAt(lifeT) * (0.35 + 0.65 * life.sleep), wind: life.wind * WIND_GAIN * (0.5 + 0.5 * gustAt(time, 0)) });
@@ -486,8 +487,9 @@ function draw(time) {
 // Tiers: MSAA 4 -> 2 -> 0, then a lower render scale (dynamic resolution) and fewer aura steps. Measured on an Intel UHD 620 at
 // 1280x720 (GPU ms, timer queries, interleaved): raw 6-11, full look no MSAA 10-14, MSAA 2 ~17, MSAA 4 ~21; with the browser's own
 // compositing on the same GPU, frames start to miss above ~12 ms. ?msaa= pins the MSAA (no governor), ?scale= the render scale.
-const TIERS = [{ msaa: 4, steps: 12, scale: 1 }, { msaa: 2, steps: 12, scale: 1 }, { msaa: 0, steps: 12, scale: 1 },
-               { msaa: 0, steps: 10, scale: 0.85 }, { msaa: 0, steps: 8, scale: 0.72 }];
+// ls = resolution of the live mountain1 shader (its cost is ~0.25 us a pixel on the UHD 620: it is the first thing to give)
+const TIERS = [{ msaa: 4, steps: 12, scale: 1, ls: 0.4 }, { msaa: 2, steps: 12, scale: 1, ls: 0.33 }, { msaa: 0, steps: 12, scale: 1, ls: 0.27 },
+               { msaa: 0, steps: 12, scale: 1, ls: 0.22 }, { msaa: 0, steps: 10, scale: 0.85, ls: 0.18 }, { msaa: 0, steps: 8, scale: 0.72, ls: 0.15 }];
 let tier = 0, govFrames = [], govSkip = 30, govClean = 0, govOn = LOOK && !Q.has('msaa');
 function governor(dt) {
   if (!govOn || document.hidden) return;
@@ -498,7 +500,7 @@ function governor(dt) {
   const slow = govFrames.filter((d) => d > 18).length / govFrames.length;
   govFrames = [];
   if (slow > 0.1 && tier < TIERS.length - 1) {
-    tier++; post.setSamples(TIERS[tier].msaa); post.aura.uniforms.uSteps.value = TIERS[tier].steps; post.setScale(TIERS[tier].scale); govSkip = 30;
+    tier++; post.setSamples(TIERS[tier].msaa); post.aura.uniforms.uSteps.value = TIERS[tier].steps; post.setScale(TIERS[tier].scale); if (world.live && !Q.has('ls')) world.live.scale = TIERS[tier].ls; govSkip = 30;
     console.info('[opening] quality tier', tier, TIERS[tier]);
   } else if (slow > 0.1 || ++govClean >= 3) govOn = false;      // at the floor, or settled after three clean windows
 }
